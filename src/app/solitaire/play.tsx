@@ -1,4 +1,4 @@
-import { router, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -12,6 +12,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { formatElapsed } from '@/game/format-time';
 import {
   TABLEAU_COUNT,
   formatCard,
@@ -27,6 +28,8 @@ import {
   loadSolitaireInProgress,
   saveSolitaireInProgress,
 } from '@/game/solitaire-progress';
+import { createDealId } from '@/game/solitaire-save';
+import { recordIncompleteGame, recordSolitaireWin } from '@/game/user-stats-store';
 
 const ROW_GAP = Spacing.four;
 const MIN_CARD_WIDTH = 40;
@@ -72,19 +75,6 @@ function layoutCards(width: number, height: number): CardLayout {
   };
 }
 
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const paddedMinutes = String(minutes).padStart(2, '0');
-  const paddedSeconds = String(seconds).padStart(2, '0');
-  if (hours > 0) {
-    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
-  }
-  return `${paddedMinutes}:${paddedSeconds}`;
-}
-
 function useGameTimer(paused: boolean, epoch: number, initialMs: number): number {
   const [elapsedMs, setElapsedMs] = useState(initialMs);
   const frozenMs = useRef(initialMs);
@@ -127,10 +117,13 @@ function useGameTimer(paused: boolean, epoch: number, initialMs: number): number
 
 export default function SolitaireScreen() {
   const navigation = useNavigation();
+  const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
+  const resume = (Array.isArray(mode) ? mode[0] : mode) === 'continue';
   const leavingRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [timerEpoch, setTimerEpoch] = useState(0);
   const [timerStartMs, setTimerStartMs] = useState(0);
+  const [dealId, setDealId] = useState('');
   const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
   const timerPaused = game == null || paused || game.won;
@@ -144,28 +137,35 @@ export default function SolitaireScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const saved = await loadSolitaireInProgress();
-      if (cancelled) {
+      if (resume) {
+        const saved = await loadSolitaireInProgress();
+        if (cancelled) {
+          return;
+        }
+        if (saved) {
+          setDealId(saved.dealId || createDealId());
+          setGame(saved.game);
+          setTimerStartMs(saved.elapsedMs);
+          return;
+        }
+        router.replace('/solitaire');
         return;
       }
-      if (saved) {
-        setGame(saved.game);
-        setTimerStartMs(saved.elapsedMs);
-        return;
-      }
+      setDealId(createDealId());
       setGame(newGame());
       setTimerStartMs(0);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resume]);
 
   useEffect(() => {
-    if (game?.won) {
-      void clearSolitaireInProgress();
+    if (!game?.won || !dealId) {
+      return;
     }
-  }, [game?.won]);
+    void recordSolitaireWin(dealId, elapsedMs).then(() => clearSolitaireInProgress());
+  }, [dealId, elapsedMs, game?.won]);
 
   useEffect(() => {
     if (!paused || game == null || game.won) {
@@ -178,11 +178,11 @@ export default function SolitaireScreen() {
       }
       event.preventDefault();
       leavingRef.current = true;
-      void saveSolitaireInProgress(game, elapsedMs).finally(() => {
+      void saveSolitaireInProgress(game, elapsedMs, dealId).finally(() => {
         navigation.dispatch(event.data.action);
       });
     });
-  }, [elapsedMs, game, navigation, paused]);
+  }, [dealId, elapsedMs, game, navigation, paused]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -215,7 +215,11 @@ export default function SolitaireScreen() {
   }, [game]);
 
   const startNewGame = () => {
+    if (game != null && !game.won) {
+      void recordIncompleteGame();
+    }
     leavingRef.current = false;
+    setDealId(createDealId());
     setGame(newGame());
     setPaused(false);
     setTimerStartMs(0);

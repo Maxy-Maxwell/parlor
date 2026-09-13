@@ -13,12 +13,25 @@ export const SOLITAIRE_IN_PROGRESS_KEY = 'solitaire:in-progress';
 export type SavedSolitaireGame = {
   game: GameState;
   elapsedMs: number;
+  dealId: string;
 };
 
-export function toSavedSolitaireGame(game: GameState, elapsedMs: number): SavedSolitaireGame {
+export function createDealId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `deal-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function toSavedSolitaireGame(
+  game: GameState,
+  elapsedMs: number,
+  dealId = '',
+): SavedSolitaireGame {
   return {
     game: { ...game, selected: null },
     elapsedMs: Math.max(0, Math.floor(elapsedMs)),
+    dealId,
   };
 }
 
@@ -32,6 +45,7 @@ export function parseSavedSolitaireGame(data: unknown): SavedSolitaireGame | nul
   return {
     game: data.game,
     elapsedMs: data.elapsedMs,
+    dealId: typeof data.dealId === 'string' ? data.dealId : '',
   };
 }
 

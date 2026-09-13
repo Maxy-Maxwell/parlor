@@ -13,7 +13,7 @@ export default function RootLayout() {
       <AnimatedSplashOverlay />
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false, title: 'Home' }} />
-        <Stack.Screen name="solitaire" options={{ title: 'Solitaire' }} />
+        <Stack.Screen name="solitaire" options={{ headerShown: false, title: 'Solitaire' }} />
         <Stack.Screen name="stats" options={{ title: 'Stats' }} />
       </Stack>
     </ThemeProvider>

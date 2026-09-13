@@ -10,16 +10,17 @@ function test(name: string, fn: () => void) {
 
 test('parses a saved in-progress game', () => {
   const game = newGame(() => 0.5);
-  const saved = parseSavedSolitaireGame({ game, elapsedMs: 12500 });
-  assert.deepEqual(saved, { game, elapsedMs: 12500 });
+  const saved = parseSavedSolitaireGame({ game, elapsedMs: 12500, dealId: 'deal-a' });
+  assert.deepEqual(saved, { game, elapsedMs: 12500, dealId: 'deal-a' });
 });
 
 test('clears selection and floors elapsed time when saving', () => {
   const game = newGame(() => 0.5);
   game.selected = { zone: 'waste' };
-  const saved = toSavedSolitaireGame(game, 1250.9);
+  const saved = toSavedSolitaireGame(game, 1250.9, 'deal-a');
   assert.equal(saved.game.selected, null);
   assert.equal(saved.elapsedMs, 1250);
+  assert.equal(saved.dealId, 'deal-a');
 });
 
 test('rejects missing fields, invalid elapsed time, and won games', () => {
