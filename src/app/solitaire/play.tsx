@@ -12,6 +12,8 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { CountAutoSolveCheckbox } from '@/debug/count-auto-solve-checkbox';
+import { getCountAutoSolveWins, setCountAutoSolveWins, shouldRecordAutoSolveWin } from '@/debug/flags';
 import { formatElapsed } from '@/game/format-time';
 import {
   TABLEAU_COUNT,
@@ -29,10 +31,12 @@ import {
   saveSolitaireInProgress,
 } from '@/game/solitaire-progress';
 import { createDealId } from '@/game/solitaire-save';
+import { applySolveStep, findSolution } from '@/game/solitaire-solver';
 import { recordIncompleteGame, recordSolitaireWin } from '@/game/user-stats-store';
 
 const ROW_GAP = Spacing.four;
 const MIN_CARD_WIDTH = 40;
+const SOLVE_MOVE_DELAY_MS = 1000;
 
 type CardLayout = {
   cardWidth: number;
@@ -120,13 +124,21 @@ export default function SolitaireScreen() {
   const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
   const resume = (Array.isArray(mode) ? mode[0] : mode) === 'continue';
   const leavingRef = useRef(false);
+  const abortSolveRef = useRef(false);
   const [paused, setPaused] = useState(false);
+  const [confirmSolve, setConfirmSolve] = useState(false);
+  const [thinking, setThinking] = useState(false);
+  const [solving, setSolving] = useState(false);
+  const [unsolvable, setUnsolvable] = useState(false);
+  const [autoSolved, setAutoSolved] = useState(false);
+  const [countAutoSolveWins, setCountAutoSolveWinsState] = useState(getCountAutoSolveWins);
   const [timerEpoch, setTimerEpoch] = useState(0);
   const [timerStartMs, setTimerStartMs] = useState(0);
   const [dealId, setDealId] = useState('');
   const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
-  const timerPaused = game == null || paused || game.won;
+  const busy = confirmSolve || thinking || solving || unsolvable;
+  const timerPaused = game == null || paused || game.won || busy;
   const elapsedMs = useGameTimer(timerPaused, timerEpoch, timerStartMs);
   const layout = useMemo(
     () => layoutCards(boardSize.width, boardSize.height),
@@ -161,14 +173,24 @@ export default function SolitaireScreen() {
   }, [resume]);
 
   useEffect(() => {
+    return () => {
+      abortSolveRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!game?.won || !dealId) {
       return;
     }
+    if (autoSolved && !shouldRecordAutoSolveWin(countAutoSolveWins)) {
+      void clearSolitaireInProgress();
+      return;
+    }
     void recordSolitaireWin(dealId, elapsedMs).then(() => clearSolitaireInProgress());
-  }, [dealId, elapsedMs, game?.won]);
+  }, [autoSolved, countAutoSolveWins, dealId, elapsedMs, game?.won]);
 
   useEffect(() => {
-    if (!paused || game == null || game.won) {
+    if (game == null || game.won) {
       return;
     }
 
@@ -178,11 +200,12 @@ export default function SolitaireScreen() {
       }
       event.preventDefault();
       leavingRef.current = true;
+      abortSolveRef.current = true;
       void saveSolitaireInProgress(game, elapsedMs, dealId).finally(() => {
         navigation.dispatch(event.data.action);
       });
     });
-  }, [dealId, elapsedMs, game, navigation, paused]);
+  }, [dealId, elapsedMs, game, navigation]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -205,16 +228,23 @@ export default function SolitaireScreen() {
     if (game == null) {
       return '';
     }
+    if (thinking) {
+      return 'Looking for a solution…';
+    }
+    if (solving) {
+      return 'Solving…';
+    }
     if (game.won) {
-      return 'You won.';
+      return autoSolved ? 'Solved.' : 'You won.';
     }
     if (game.selected) {
       return 'Tap a pile to move, or tap the card again to cancel.';
     }
     return 'Tap a card, then tap where it should go. Tap the stock to draw.';
-  }, [game]);
+  }, [autoSolved, game, solving, thinking]);
 
   const startNewGame = () => {
+    abortSolveRef.current = true;
     if (game != null && !game.won) {
       void recordIncompleteGame();
     }
@@ -222,13 +252,83 @@ export default function SolitaireScreen() {
     setDealId(createDealId());
     setGame(newGame());
     setPaused(false);
+    setConfirmSolve(false);
+    setThinking(false);
+    setSolving(false);
+    setUnsolvable(false);
+    setAutoSolved(false);
     setTimerStartMs(0);
     setTimerEpoch((value) => value + 1);
     void clearSolitaireInProgress();
   };
 
+  const pauseGame = () => {
+    abortSolveRef.current = true;
+    leavingRef.current = false;
+    setConfirmSolve(false);
+    setThinking(false);
+    setSolving(false);
+    setUnsolvable(false);
+    if (game != null && !game.won) {
+      setAutoSolved(false);
+    }
+    setPaused(true);
+  };
+
+  const leaveToHome = () => {
+    abortSolveRef.current = true;
+    leavingRef.current = true;
+    if (game != null && !game.won) {
+      void saveSolitaireInProgress(game, elapsedMs, dealId).finally(() => {
+        router.replace('/');
+      });
+      return;
+    }
+    router.replace('/');
+  };
+
   const play = (target: ClickTarget) => {
+    if (busy) {
+      return;
+    }
     setGame((current) => (current ? handleClick(current, target) : current));
+  };
+
+  const startSolve = (current: GameState) => {
+    abortSolveRef.current = false;
+    setConfirmSolve(false);
+    setUnsolvable(false);
+    setAutoSolved(true);
+    setThinking(true);
+
+    setTimeout(() => {
+      if (abortSolveRef.current) {
+        return;
+      }
+      const steps = findSolution(current);
+      if (abortSolveRef.current) {
+        return;
+      }
+      if (!steps) {
+        setAutoSolved(false);
+        setThinking(false);
+        setUnsolvable(true);
+        return;
+      }
+
+      setThinking(false);
+      setSolving(true);
+      void (async () => {
+        for (const step of steps) {
+          await new Promise((resolve) => setTimeout(resolve, SOLVE_MOVE_DELAY_MS));
+          if (abortSolveRef.current) {
+            return;
+          }
+          setGame((value) => (value ? applySolveStep(value, step) : value));
+        }
+        setSolving(false);
+      })();
+    }, 50);
   };
 
   if (game == null) {
@@ -245,19 +345,39 @@ export default function SolitaireScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Pause"
-            onPress={() => setPaused(true)}
-            style={({ pressed }) => [styles.toolbarButton, pressed && styles.pressed]}>
+            disabled={game.won}
+            onPress={pauseGame}
+            style={({ pressed }) => [styles.toolbarButton, pressed && !game.won && styles.pressed]}>
             <ThemedText type="smallBold">Pause</ThemedText>
           </Pressable>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="Solve"
+            disabled={busy || game.won}
+            onPress={() => setConfirmSolve(true)}
+            style={({ pressed }) => [styles.toolbarButton, pressed && !busy && styles.pressed]}>
+            <ThemedText type="smallBold">Solve</ThemedText>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="New game"
+            disabled={thinking || solving}
             onPress={startNewGame}
             style={({ pressed }) => [styles.toolbarButton, pressed && styles.pressed]}>
             <ThemedText type="smallBold">New game</ThemedText>
           </Pressable>
         </View>
       </View>
+
+      {__DEV__ ? (
+        <CountAutoSolveCheckbox
+          value={countAutoSolveWins}
+          onValueChange={(value) => {
+            setCountAutoSolveWins(value);
+            setCountAutoSolveWinsState(value);
+          }}
+        />
+      ) : null}
 
       <View style={styles.board}>
         <View
@@ -373,10 +493,12 @@ export default function SolitaireScreen() {
         <ThemedView
           style={styles.overlay}
           accessibilityViewIsModal
-          accessibilityLabel={`You won in ${timeLabel}`}>
+          accessibilityLabel={
+            autoSolved ? `Solved in ${timeLabel}` : `You won in ${timeLabel}`
+          }>
           <View style={styles.pauseMenu}>
             <ThemedText type="subtitle" style={styles.winTitle}>
-              You won
+              {autoSolved ? 'Solved' : 'You won'}
             </ThemedText>
             <ThemedText
               type="title"
@@ -391,16 +513,80 @@ export default function SolitaireScreen() {
               onPress={startNewGame}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle">1. New game</ThemedText>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  New game
+                </ThemedText>
               </ThemedView>
             </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Menu"
-              onPress={() => router.replace('/')}
+              onPress={leaveToHome}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle">2. Menu</ThemedText>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  Menu
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+          </View>
+        </ThemedView>
+      ) : unsolvable ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel="This game can't be solved">
+          <View style={styles.pauseMenu}>
+            <ThemedText type="subtitle" style={styles.winTitle}>
+              This game can't be solved
+            </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="OK"
+              onPress={() => setUnsolvable(false)}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  OK
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+          </View>
+        </ThemedView>
+      ) : confirmSolve ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel="Solve this game?">
+          <View style={styles.pauseMenu}>
+            <ThemedText type="subtitle" style={styles.winTitle}>
+              Solve this game?
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.winTitle}>
+              {shouldRecordAutoSolveWin(countAutoSolveWins)
+                ? 'Moves play automatically. This win will count toward your stats.'
+                : 'Moves play automatically. A solved game does not count toward your stats.'}
+            </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Solve"
+              onPress={() => startSolve(game)}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  Solve
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              onPress={() => setConfirmSolve(false)}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  Cancel
+                </ThemedText>
               </ThemedView>
             </Pressable>
           </View>
@@ -417,16 +603,20 @@ export default function SolitaireScreen() {
               onPress={() => setPaused(false)}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle">1. Resume</ThemedText>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  Resume
+                </ThemedText>
               </ThemedView>
             </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Menu"
-              onPress={() => router.replace('/')}
+              onPress={leaveToHome}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle">2. Menu</ThemedText>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  Menu
+                </ThemedText>
               </ThemedView>
             </Pressable>
           </View>
@@ -470,6 +660,8 @@ const styles = StyleSheet.create({
   },
   toolbarActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     gap: Spacing.two,
   },
   toolbarButton: {
@@ -519,6 +711,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.four,
     paddingHorizontal: Spacing.four,
     borderRadius: Spacing.four,
+    alignItems: 'center',
+  },
+  menuButtonLabel: {
+    textAlign: 'center',
   },
   board: {
     flex: 1,

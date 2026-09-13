@@ -7,7 +7,6 @@ import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 
 export type MenuItem = {
-  number: string;
   label: string;
   href?: Href;
   onPress?: () => void;
@@ -37,8 +36,11 @@ export function MenuList({
               item.disabled && styles.disabled,
             ]}>
             <ThemedView type="backgroundElement" style={styles.button}>
-              <ThemedText type="subtitle" themeColor={item.disabled ? 'textSecondary' : 'text'}>
-                {item.number}. {item.label}
+              <ThemedText
+                type="subtitle"
+                themeColor={item.disabled ? 'textSecondary' : 'text'}
+                style={styles.label}>
+                {item.label}
               </ThemedText>
             </ThemedView>
           </Pressable>
@@ -46,7 +48,7 @@ export function MenuList({
 
         if (item.href && !item.disabled) {
           return (
-            <Link key={item.label} href={item.href} asChild>
+            <Link key={item.label} href={item.href} withAnchor asChild>
               {button}
             </Link>
           );
@@ -97,5 +99,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.four,
     paddingHorizontal: Spacing.four,
     borderRadius: Spacing.four,
+    alignItems: 'center',
+  },
+  label: {
+    textAlign: 'center',
   },
 });

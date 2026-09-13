@@ -1,8 +1,8 @@
 import { MenuList } from '@/components/menu-list';
 
 const MENU = [
-  { href: '/solitaire' as const, number: '1', label: 'Solitaire' },
-  { href: '/stats' as const, number: '2', label: 'Stats' },
+  { href: '/solitaire' as const, label: 'Solitaire' },
+  { href: '/stats' as const, label: 'Stats' },
 ];
 
 export default function HomeScreen() {

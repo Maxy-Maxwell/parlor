@@ -41,12 +41,10 @@ export default function SolitaireMenuScreen() {
       safeArea={false}
       items={[
         {
-          number: '1',
           label: 'New',
           onPress: startNew,
         },
         {
-          number: '2',
           label: 'Continue',
           disabled: !canContinue,
           onPress: () => router.push({ pathname: '/solitaire/play', params: { mode: 'continue' } }),

@@ -212,4 +212,21 @@ test('newGame shuffles rather than using deck order', () => {
   assert.notDeepEqual(orderedIds, randomIds);
 });
 
+test('newGame deals every card once in a standard Klondike layout', () => {
+  const game = newGame(() => 0.37);
+  const cards = [
+    ...game.tableau.flat(),
+    ...game.foundations.flat(),
+    ...game.stock,
+    ...game.waste,
+  ];
+  assert.equal(cards.length, 52);
+  assert.equal(new Set(cards.map((item) => item.id)).size, 52);
+  assert.deepEqual(
+    game.tableau.map((pile) => pile.length),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+  assert.equal(game.stock.length, 24);
+});
+
 console.log('all tests passed');
