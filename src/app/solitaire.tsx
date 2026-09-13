@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { router, useNavigation } from 'expo-router';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import {
@@ -18,8 +19,14 @@ import {
   isCardSelected,
   newGame,
   type Card,
+  type ClickTarget,
   type GameState,
 } from '@/game/solitaire';
+import {
+  clearSolitaireInProgress,
+  loadSolitaireInProgress,
+  saveSolitaireInProgress,
+} from '@/game/solitaire-progress';
 
 const ROW_GAP = Spacing.four;
 const MIN_CARD_WIDTH = 40;
@@ -65,15 +72,139 @@ function layoutCards(width: number, height: number): CardLayout {
   };
 }
 
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, '0');
+  const paddedSeconds = String(seconds).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${paddedMinutes}:${paddedSeconds}`;
+}
+
+function useGameTimer(paused: boolean, epoch: number, initialMs: number): number {
+  const [elapsedMs, setElapsedMs] = useState(initialMs);
+  const frozenMs = useRef(initialMs);
+  const runningSince = useRef<number | null>(null);
+  const seed = useRef({ epoch, initialMs });
+
+  if (seed.current.epoch !== epoch || seed.current.initialMs !== initialMs) {
+    seed.current = { epoch, initialMs };
+    frozenMs.current = initialMs;
+    runningSince.current = null;
+    setElapsedMs(initialMs);
+  }
+
+  useEffect(() => {
+    if (paused) {
+      if (runningSince.current !== null) {
+        frozenMs.current += Date.now() - runningSince.current;
+        runningSince.current = null;
+        setElapsedMs(frozenMs.current);
+      }
+      return;
+    }
+
+    runningSince.current = Date.now();
+    const id = setInterval(() => {
+      const started = runningSince.current;
+      if (started === null) {
+        return;
+      }
+      setElapsedMs(frozenMs.current + Date.now() - started);
+    }, 250);
+
+    return () => {
+      clearInterval(id);
+    };
+  }, [epoch, initialMs, paused]);
+
+  return elapsedMs;
+}
+
 export default function SolitaireScreen() {
-  const [game, setGame] = useState<GameState>(() => newGame());
+  const navigation = useNavigation();
+  const leavingRef = useRef(false);
+  const [paused, setPaused] = useState(false);
+  const [timerEpoch, setTimerEpoch] = useState(0);
+  const [timerStartMs, setTimerStartMs] = useState(0);
+  const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
+  const timerPaused = game == null || paused || game.won;
+  const elapsedMs = useGameTimer(timerPaused, timerEpoch, timerStartMs);
   const layout = useMemo(
     () => layoutCards(boardSize.width, boardSize.height),
     [boardSize.height, boardSize.width],
   );
+  const timeLabel = formatElapsed(elapsedMs);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const saved = await loadSolitaireInProgress();
+      if (cancelled) {
+        return;
+      }
+      if (saved) {
+        setGame(saved.game);
+        setTimerStartMs(saved.elapsedMs);
+        return;
+      }
+      setGame(newGame());
+      setTimerStartMs(0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (game?.won) {
+      void clearSolitaireInProgress();
+    }
+  }, [game?.won]);
+
+  useEffect(() => {
+    if (!paused || game == null || game.won) {
+      return;
+    }
+
+    return navigation.addListener('beforeRemove', (event) => {
+      if (leavingRef.current) {
+        return;
+      }
+      event.preventDefault();
+      leavingRef.current = true;
+      void saveSolitaireInProgress(game, elapsedMs).finally(() => {
+        navigation.dispatch(event.data.action);
+      });
+    });
+  }, [elapsedMs, game, navigation, paused]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight:
+        game == null
+          ? undefined
+          : () => (
+              <ThemedText
+                type="smallBold"
+                accessibilityRole="timer"
+                accessibilityLabel={`Elapsed time ${timeLabel}`}
+                style={styles.timer}>
+                {timeLabel}
+              </ThemedText>
+            ),
+    });
+  }, [game, navigation, timeLabel]);
 
   const status = useMemo(() => {
+    if (game == null) {
+      return '';
+    }
     if (game.won) {
       return 'You won.';
     }
@@ -81,19 +212,47 @@ export default function SolitaireScreen() {
       return 'Tap a pile to move, or tap the card again to cancel.';
     }
     return 'Tap a card, then tap where it should go. Tap the stock to draw.';
-  }, [game.selected, game.won]);
+  }, [game]);
+
+  const startNewGame = () => {
+    leavingRef.current = false;
+    setGame(newGame());
+    setPaused(false);
+    setTimerStartMs(0);
+    setTimerEpoch((value) => value + 1);
+    void clearSolitaireInProgress();
+  };
+
+  const play = (target: ClickTarget) => {
+    setGame((current) => (current ? handleClick(current, target) : current));
+  };
+
+  if (game == null) {
+    return <ThemedView style={styles.screen} />;
+  }
 
   return (
     <ThemedView style={styles.screen}>
       <View style={styles.toolbar}>
-        <ThemedText type="small">{status}</ThemedText>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New game"
-          onPress={() => setGame(newGame())}
-          style={({ pressed }) => [styles.newGame, pressed && styles.pressed]}>
-          <ThemedText type="smallBold">New game</ThemedText>
-        </Pressable>
+        <ThemedText type="small" style={styles.status}>
+          {status}
+        </ThemedText>
+        <View style={styles.toolbarActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Pause"
+            onPress={() => setPaused(true)}
+            style={({ pressed }) => [styles.toolbarButton, pressed && styles.pressed]}>
+            <ThemedText type="smallBold">Pause</ThemedText>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New game"
+            onPress={startNewGame}
+            style={({ pressed }) => [styles.toolbarButton, pressed && styles.pressed]}>
+            <ThemedText type="smallBold">New game</ThemedText>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.board}>
@@ -120,9 +279,7 @@ export default function SolitaireScreen() {
                   accessibilityLabel={
                     top ? `Foundation ${formatCard(top)}` : `Empty foundation ${pileIndex + 1}`
                   }
-                  onPress={() =>
-                    setGame((current) => handleClick(current, { zone: 'foundation', pile: pileIndex }))
-                  }
+                  onPress={() => play({ zone: 'foundation', pile: pileIndex })}
                 />
               );
             })}
@@ -139,7 +296,7 @@ export default function SolitaireScreen() {
                   ? `Waste ${formatCard(game.waste[game.waste.length - 1])}`
                   : 'Empty waste'
               }
-              onPress={() => setGame((current) => handleClick(current, { zone: 'waste' }))}
+              onPress={() => play({ zone: 'waste' })}
             />
             <SolitaireCard
               width={layout.cardWidth}
@@ -153,7 +310,7 @@ export default function SolitaireScreen() {
                     ? 'Recycle waste into stock'
                     : 'Empty stock'
               }
-              onPress={() => setGame((current) => handleClick(current, { zone: 'stock' }))}
+              onPress={() => play({ zone: 'stock' })}
             />
             </View>
           </View>
@@ -176,9 +333,7 @@ export default function SolitaireScreen() {
                       width={layout.cardWidth}
                       emptyHint="K"
                       accessibilityLabel={`Empty tableau pile ${pileIndex + 1}`}
-                      onPress={() =>
-                        setGame((current) => handleClick(current, { zone: 'tableau', pile: pileIndex }))
-                      }
+                      onPress={() => play({ zone: 'tableau', pile: pileIndex })}
                     />
                   ) : (
                     pile.map((item, index) => (
@@ -198,11 +353,7 @@ export default function SolitaireScreen() {
                               ? `Tableau ${formatCard(item)}`
                               : `Face-down card in pile ${pileIndex + 1}`
                           }
-                          onPress={() =>
-                            setGame((current) =>
-                              handleClick(current, { zone: 'tableau', pile: pileIndex, index }),
-                            )
-                          }
+                          onPress={() => play({ zone: 'tableau', pile: pileIndex, index })}
                         />
                       </View>
                     ))
@@ -213,6 +364,70 @@ export default function SolitaireScreen() {
           </ScrollView>
         </View>
       </View>
+
+      {game.won ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel={`You won in ${timeLabel}`}>
+          <View style={styles.pauseMenu}>
+            <ThemedText type="subtitle" style={styles.winTitle}>
+              You won
+            </ThemedText>
+            <ThemedText
+              type="title"
+              accessibilityRole="timer"
+              accessibilityLabel={`Final time ${timeLabel}`}
+              style={styles.winTime}>
+              {timeLabel}
+            </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New game"
+              onPress={startNewGame}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle">1. New game</ThemedText>
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Menu"
+              onPress={() => router.replace('/')}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle">2. Menu</ThemedText>
+              </ThemedView>
+            </Pressable>
+          </View>
+        </ThemedView>
+      ) : paused ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel="Game paused">
+          <View style={styles.pauseMenu}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Resume"
+              onPress={() => setPaused(false)}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle">1. Resume</ThemedText>
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Menu"
+              onPress={() => router.replace('/')}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle">2. Menu</ThemedText>
+              </ThemedView>
+            </Pressable>
+          </View>
+        </ThemedView>
+      ) : null}
     </ThemedView>
   );
 }
@@ -245,14 +460,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  newGame: {
+  status: {
+    flex: 1,
+    paddingRight: Spacing.two,
+  },
+  toolbarActions: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  toolbarButton: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
     borderRadius: Spacing.two,
     backgroundColor: '#E0E1E6',
   },
+  timer: {
+    marginRight: Spacing.three,
+    minWidth: 52,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
   pressed: {
     opacity: 0.75,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    zIndex: 20,
+  },
+  pauseMenu: {
+    width: '100%',
+    maxWidth: 420,
+    gap: Spacing.three,
+    alignItems: 'center',
+  },
+  winTitle: {
+    textAlign: 'center',
+  },
+  winTime: {
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  pauseAction: {
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  pauseButton: {
+    paddingVertical: Spacing.four,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Spacing.four,
   },
   board: {
     flex: 1,
