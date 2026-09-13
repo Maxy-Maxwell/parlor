@@ -7,13 +7,13 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 1. Install dependencies
 
    ```bash
-   npm install
+   npm.cmd install
    ```
 
 2. Start the app
 
    ```bash
-   npx expo start
+   npx.cmd expo start
    ```
 
 In the output, you'll find options to open the app in a
