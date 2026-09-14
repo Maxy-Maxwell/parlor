@@ -20,6 +20,7 @@ function blank(): GameState {
     waste: [],
     selected: null,
     won: false,
+    drawCount: 1,
   };
 }
 

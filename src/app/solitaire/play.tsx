@@ -30,6 +30,7 @@ import {
   newGame,
   type Card,
   type ClickTarget,
+  type DrawCount,
   type GameState,
 } from '@/game/solitaire';
 import {
@@ -46,6 +47,10 @@ import { useUserSettings } from '@/hooks/use-user-settings';
 const ROW_GAP = Spacing.four;
 const MIN_CARD_WIDTH = 40;
 const SOLVE_MOVE_DELAY_MS = 1000;
+
+function firstParam(value?: string | string[]): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 type CardLayout = {
   cardWidth: number;
@@ -133,8 +138,12 @@ export default function SolitaireScreen() {
   const theme = useTheme();
   const { settings } = useUserSettings();
   const hideTimer = settings.solitaire.hideTimer;
-  const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
-  const resume = (Array.isArray(mode) ? mode[0] : mode) === 'continue';
+  const { mode, draw } = useLocalSearchParams<{
+    mode?: string | string[];
+    draw?: string | string[];
+  }>();
+  const resume = firstParam(mode) === 'continue';
+  const requestedDraw: DrawCount = firstParam(draw) === '3' ? 3 : 1;
   const leavingRef = useRef(false);
   const abortSolveRef = useRef(false);
   const pulseTokenRef = useRef(0);
@@ -181,13 +190,13 @@ export default function SolitaireScreen() {
         return;
       }
       setDealId(createDealId());
-      setGame(newGame());
+      setGame(newGame(Math.random, requestedDraw));
       setTimerStartMs(0);
     })();
     return () => {
       cancelled = true;
     };
-  }, [resume]);
+  }, [requestedDraw, resume]);
 
   useEffect(() => {
     return () => {
@@ -196,15 +205,15 @@ export default function SolitaireScreen() {
   }, []);
 
   useEffect(() => {
-    if (!game?.won || !dealId) {
+    if (game == null || !game.won || !dealId) {
       return;
     }
     if (autoSolved && !shouldRecordAutoSolveWin(countAutoSolveWins)) {
       void clearSolitaireInProgress();
       return;
     }
-    void recordSolitaireWin(dealId, elapsedMs).then(() => clearSolitaireInProgress());
-  }, [autoSolved, countAutoSolveWins, dealId, elapsedMs, game?.won]);
+    void recordSolitaireWin(dealId, elapsedMs, game.drawCount).then(() => clearSolitaireInProgress());
+  }, [autoSolved, countAutoSolveWins, dealId, elapsedMs, game]);
 
   useEffect(() => {
     if (game == null || game.won) {
@@ -226,6 +235,15 @@ export default function SolitaireScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      title: game
+        ? game.drawCount === 3
+          ? '3-card Solitaire'
+          : '1-card Solitaire'
+        : resume
+          ? 'Solitaire'
+          : requestedDraw === 3
+            ? '3-card Solitaire'
+            : '1-card Solitaire',
       headerRight: () => (
         <SettingsHeaderRight>
           {game == null || hideTimer ? null : (
@@ -240,7 +258,7 @@ export default function SolitaireScreen() {
         </SettingsHeaderRight>
       ),
     });
-  }, [game, hideTimer, navigation, timeLabel]);
+  }, [game, hideTimer, navigation, requestedDraw, resume, timeLabel]);
 
   const status = useMemo(() => {
     if (game == null) {
@@ -258,17 +276,19 @@ export default function SolitaireScreen() {
     if (game.selected) {
       return 'Tap a pile to move, or tap the card again to cancel.';
     }
-    return 'Tap a card, then tap where it should go. Tap the stock to draw.';
+    return game.drawCount === 3
+      ? 'Tap a card, then tap where it should go. Tap the stock to draw three cards.'
+      : 'Tap a card, then tap where it should go. Tap the stock to draw.';
   }, [autoSolved, game, solving, thinking]);
 
   const startNewGame = () => {
     abortSolveRef.current = true;
     if (game != null && !game.won) {
-      void recordIncompleteGame(elapsedMs);
+      void recordIncompleteGame(elapsedMs, game.drawCount);
     }
     leavingRef.current = false;
     setDealId(createDealId());
-    setGame(newGame());
+    setGame(newGame(Math.random, game?.drawCount ?? requestedDraw));
     setPaused(false);
     setConfirmSolve(false);
     setThinking(false);
@@ -463,20 +483,12 @@ export default function SolitaireScreen() {
           </View>
 
           <View style={[styles.stockWaste, { gap: layout.columnGap }]}>
-            <SlotAnchor slotId="waste" pulse={solverPulse}>
-              <SolitaireCard
-                width={layout.cardWidth}
-                card={game.waste[game.waste.length - 1]}
-                emptyHint="W"
-                selected={isCardSelected(game, { zone: 'waste' })}
-                accessibilityLabel={
-                  game.waste.length
-                    ? `Waste ${formatCard(game.waste[game.waste.length - 1])}`
-                    : 'Empty waste'
-                }
-                onPress={() => play({ zone: 'waste' })}
-              />
-            </SlotAnchor>
+            <WastePile
+              game={game}
+              layout={layout}
+              pulse={solverPulse}
+              onPress={() => play({ zone: 'waste' })}
+            />
             <SlotAnchor slotId="stock" pulse={solverPulse}>
               <SolitaireCard
                 width={layout.cardWidth}
@@ -710,6 +722,76 @@ function pileHeight(pile: Card[], layout: CardLayout): number {
   return cardOffset(pile, pile.length - 1, layout) + layout.cardHeight;
 }
 
+function wasteFanPeek(cardWidth: number): number {
+  return Math.max(16, Math.round(cardWidth * 0.34));
+}
+
+function visibleWaste(game: GameState): Card[] {
+  if (game.waste.length === 0) {
+    return [];
+  }
+  return game.drawCount === 3 ? game.waste.slice(-3) : game.waste.slice(-1);
+}
+
+function WastePile({
+  game,
+  layout,
+  pulse,
+  onPress,
+}: {
+  game: GameState;
+  layout: CardLayout;
+  pulse: { token: number; ids: ReadonlySet<string> } | null;
+  onPress: () => void;
+}) {
+  const visible = visibleWaste(game);
+  const selected = isCardSelected(game, { zone: 'waste' });
+  const peek = wasteFanPeek(layout.cardWidth);
+  const width = layout.cardWidth + peek * Math.max(0, visible.length - 1);
+
+  if (visible.length === 0) {
+    return (
+      <SlotAnchor slotId="waste" pulse={pulse}>
+        <SolitaireCard
+          width={layout.cardWidth}
+          emptyHint="W"
+          selected={false}
+          accessibilityLabel="Empty waste"
+          onPress={onPress}
+        />
+      </SlotAnchor>
+    );
+  }
+
+  return (
+    <View style={{ width, height: layout.cardHeight }}>
+      {visible.map((card, index) => {
+        const top = index === visible.length - 1;
+        const face = (
+          <SolitaireCard
+            width={layout.cardWidth}
+            card={card}
+            selected={top && selected}
+            accessibilityLabel={top ? `Waste ${formatCard(card)}` : `Covered waste ${formatCard(card)}`}
+            onPress={onPress}
+          />
+        );
+        return (
+          <View key={card.id} style={[styles.stackedCard, { left: index * peek, zIndex: index }]}>
+            {top ? (
+              <SlotAnchor slotId="waste" pulse={pulse}>
+                {face}
+              </SlotAnchor>
+            ) : (
+              face
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -802,6 +884,8 @@ const styles = StyleSheet.create({
   },
   stockWaste: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    overflow: 'visible',
   },
   tableauScroll: {
     flex: 1,

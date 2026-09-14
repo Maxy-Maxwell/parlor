@@ -8,10 +8,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { formatElapsed } from '@/game/format-time';
+import type { DrawCount } from '@/game/solitaire';
 import {
   averageWonMs,
   EMPTY_USER_STATS,
+  statsForDraws,
   type UserStats,
+  type VariantStats,
   winRatePercent,
 } from '@/game/user-stats';
 import { loadUserStats, resetUserStats } from '@/game/user-stats-store';
@@ -147,7 +150,7 @@ function gamesPlayedLabel(total: number): string {
   return total === 1 ? '1 Game Played' : `${total} Games Played`;
 }
 
-function scorecardBlurb(stats: UserStats): string {
+function scorecardBlurb(stats: VariantStats): string {
   const played = stats.gamesWon + stats.gamesNotCompleted;
   if (played === 0) {
     return 'No Hands Yet — Deal A Game!';
@@ -166,22 +169,68 @@ function scorecardBlurb(stats: UserStats): string {
 }
 
 function SolitaireDashboard({ stats }: { stats: UserStats }) {
-  const gamesWon = String(stats.gamesWon);
-  const gamesPlayed = stats.gamesWon + stats.gamesNotCompleted;
-  const fastest = formatWonTime(stats.fastestWonMs);
-  const average = formatWonTime(averageWonMs(stats));
+  const theme = useTheme();
+  const [oneCard, setOneCard] = useState(true);
+  const [threeCard, setThreeCard] = useState(true);
+  const draws: DrawCount[] = [
+    ...(oneCard ? ([1] as const) : []),
+    ...(threeCard ? ([3] as const) : []),
+  ];
+  const visible = statsForDraws(stats, draws);
+  const gamesWon = String(visible.gamesWon);
+  const gamesPlayed = visible.gamesWon + visible.gamesNotCompleted;
+  const fastest = formatWonTime(visible.fastestWonMs);
+  const average = formatWonTime(averageWonMs(visible));
+  const scorecardTitle =
+    oneCard && threeCard ? 'Solitaire Scorecard' : oneCard ? '1 Card Scorecard' : '3 Card Scorecard';
+
+  const toggleOneCard = () => {
+    if (oneCard && !threeCard) {
+      return;
+    }
+    setOneCard((value) => !value);
+  };
+
+  const toggleThreeCard = () => {
+    if (threeCard && !oneCard) {
+      return;
+    }
+    setThreeCard((value) => !value);
+  };
 
   return (
     <View style={styles.dashboard}>
+      <View
+        accessibilityRole="toolbar"
+        accessibilityLabel="Solitaire stats filters"
+        style={[styles.filters, { backgroundColor: theme.backgroundElement }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="1 Card"
+          accessibilityState={{ selected: oneCard }}
+          onPress={toggleOneCard}
+          style={[styles.filter, oneCard && { backgroundColor: theme.background }]}>
+          <ThemedText type="smallBold">1 Card</ThemedText>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="3 Card"
+          accessibilityState={{ selected: threeCard }}
+          onPress={toggleThreeCard}
+          style={[styles.filter, threeCard && { backgroundColor: theme.background }]}>
+          <ThemedText type="smallBold">3 Card</ThemedText>
+        </Pressable>
+      </View>
+
       <View style={styles.banner}>
         <ThemedText accessible={false} style={styles.suits}>
           ♠️   ♥️   ♦️   ♣️
         </ThemedText>
         <ThemedText type="smallBold" style={styles.bannerTitle}>
-          Klondike Scorecard
+          {scorecardTitle}
         </ThemedText>
         <ThemedText type="small" themeColor="textSecondary" style={styles.bannerBlurb}>
-          {scorecardBlurb(stats)}
+          {scorecardBlurb(visible)}
         </ThemedText>
       </View>
 
@@ -189,8 +238,8 @@ function SolitaireDashboard({ stats }: { stats: UserStats }) {
         emoji="🎯"
         title="Games Won Vs Not Completed"
         subtitle={gamesPlayedLabel(gamesPlayed)}>
-        <WinRateDoughnut won={stats.gamesWon} unfinished={stats.gamesNotCompleted} />
-        <DoughnutLegend won={stats.gamesWon} unfinished={stats.gamesNotCompleted} />
+        <WinRateDoughnut won={visible.gamesWon} unfinished={visible.gamesNotCompleted} />
+        <DoughnutLegend won={visible.gamesWon} unfinished={visible.gamesNotCompleted} />
       </StatWidget>
 
       <View style={styles.row}>
@@ -251,6 +300,20 @@ const styles = StyleSheet.create({
   },
   dashboard: {
     gap: Spacing.three,
+  },
+  filters: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    borderRadius: Spacing.three,
+    padding: Spacing.one,
+    gap: Spacing.one,
+  },
+  filter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: 10,
   },
   banner: {
     alignItems: 'center',

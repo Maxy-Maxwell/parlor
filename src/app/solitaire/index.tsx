@@ -25,14 +25,14 @@ export default function SolitaireMenuScreen() {
     }, []),
   );
 
-  const startNew = () => {
+  const startNew = (drawCount: 1 | 3) => {
     void (async () => {
       const saved = await loadSolitaireInProgress();
       if (saved) {
-        await recordIncompleteGame(saved.elapsedMs);
+        await recordIncompleteGame(saved.elapsedMs, saved.game.drawCount);
         await clearSolitaireInProgress();
       }
-      router.push({ pathname: '/solitaire/play', params: { mode: 'new' } });
+      router.push({ pathname: '/solitaire/play', params: { mode: 'new', draw: String(drawCount) } });
     })();
   };
 
@@ -41,8 +41,12 @@ export default function SolitaireMenuScreen() {
       safeArea={false}
       items={[
         {
-          label: 'New',
-          onPress: startNew,
+          label: '1 Card',
+          onPress: () => startNew(1),
+        },
+        {
+          label: '3 Card',
+          onPress: () => startNew(3),
         },
         {
           label: 'Continue',

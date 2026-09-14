@@ -5,8 +5,10 @@ import {
   applyWin,
   averageWonMs,
   EMPTY_USER_STATS,
+  EMPTY_VARIANT_STATS,
   MIN_STATS_GAME_MS,
   parseUserStats,
+  statsForDraws,
   winRatePercent,
 } from './user-stats.ts';
 
@@ -17,16 +19,31 @@ function test(name: string, fn: () => void) {
 
 test('win updates count, total time, and fastest time', () => {
   const first = applyWin(EMPTY_USER_STATS, 12000, 'deal-a');
-  assert.equal(first.gamesWon, 1);
-  assert.equal(first.totalWonMs, 12000);
-  assert.equal(first.fastestWonMs, 12000);
-  assert.equal(averageWonMs(first), 12000);
+  assert.equal(first.byDraw[1].gamesWon, 1);
+  assert.equal(first.byDraw[1].totalWonMs, 12000);
+  assert.equal(first.byDraw[1].fastestWonMs, 12000);
+  assert.equal(averageWonMs(first.byDraw[1]), 12000);
+  assert.equal(first.byDraw[3].gamesWon, 0);
 
   const second = applyWin(first, 8000, 'deal-b');
-  assert.equal(second.gamesWon, 2);
-  assert.equal(second.totalWonMs, 20000);
-  assert.equal(second.fastestWonMs, 8000);
-  assert.equal(averageWonMs(second), 10000);
+  assert.equal(second.byDraw[1].gamesWon, 2);
+  assert.equal(second.byDraw[1].totalWonMs, 20000);
+  assert.equal(second.byDraw[1].fastestWonMs, 8000);
+  assert.equal(averageWonMs(second.byDraw[1]), 10000);
+});
+
+test('wins for one-card and three-card games are tracked separately', () => {
+  const one = applyWin(EMPTY_USER_STATS, 12000, 'deal-a', 1);
+  const both = applyWin(one, 4000, 'deal-b', 3);
+  assert.equal(both.byDraw[1].gamesWon, 1);
+  assert.equal(both.byDraw[3].gamesWon, 1);
+  assert.equal(both.byDraw[3].fastestWonMs, 4000);
+
+  const combined = statsForDraws(both, [1, 3]);
+  assert.equal(combined.gamesWon, 2);
+  assert.equal(combined.totalWonMs, 16000);
+  assert.equal(combined.fastestWonMs, 4000);
+  assert.deepEqual(statsForDraws(both, [3]), both.byDraw[3]);
 });
 
 test('the same deal is not counted as a win twice', () => {
@@ -38,10 +55,10 @@ test('the same deal is not counted as a win twice', () => {
 test('incomplete games are tracked in the win rate', () => {
   const won = applyWin(EMPTY_USER_STATS, 10000, 'deal-a');
   const mixed = applyIncomplete(applyIncomplete(won, MIN_STATS_GAME_MS), MIN_STATS_GAME_MS);
-  assert.equal(mixed.gamesWon, 1);
-  assert.equal(mixed.gamesNotCompleted, 2);
-  assert.equal(Math.round(winRatePercent(mixed) ?? 0), 33);
-  assert.equal(winRatePercent(EMPTY_USER_STATS), null);
+  assert.equal(mixed.byDraw[1].gamesWon, 1);
+  assert.equal(mixed.byDraw[1].gamesNotCompleted, 2);
+  assert.equal(Math.round(winRatePercent(mixed.byDraw[1]) ?? 0), 33);
+  assert.equal(winRatePercent(EMPTY_VARIANT_STATS), null);
 });
 
 test('incomplete games under 15 seconds are omitted from the tally', () => {
@@ -49,10 +66,12 @@ test('incomplete games under 15 seconds are omitted from the tally', () => {
   assert.deepEqual(skipped, EMPTY_USER_STATS);
 
   const counted = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS);
-  assert.equal(counted.gamesNotCompleted, 1);
+  assert.equal(counted.byDraw[1].gamesNotCompleted, 1);
+  assert.equal(counted.byDraw[3].gamesNotCompleted, 0);
 
-  const mixed = applyIncomplete(applyIncomplete(EMPTY_USER_STATS, 5_000), 20_000);
-  assert.equal(mixed.gamesNotCompleted, 1);
+  const mixed = applyIncomplete(applyIncomplete(EMPTY_USER_STATS, 5_000, 3), 20_000, 3);
+  assert.equal(mixed.byDraw[3].gamesNotCompleted, 1);
+  assert.equal(mixed.byDraw[1].gamesNotCompleted, 0);
 });
 
 test('parseUserStats falls back to empty stats for invalid payloads', () => {
@@ -67,11 +86,54 @@ test('parseUserStats falls back to empty stats for invalid payloads', () => {
       lastWinDealId: 'deal-a',
     }),
     {
-      gamesWon: 2,
-      gamesNotCompleted: 1,
-      totalWonMs: 9000,
-      fastestWonMs: 3000,
-      lastWinDealId: 'deal-a',
+      byDraw: {
+        1: {
+          gamesWon: 2,
+          gamesNotCompleted: 1,
+          totalWonMs: 9000,
+          fastestWonMs: 3000,
+          lastWinDealId: 'deal-a',
+        },
+        3: EMPTY_VARIANT_STATS,
+      },
+    },
+  );
+  assert.deepEqual(
+    parseUserStats({
+      byDraw: {
+        1: {
+          gamesWon: 1,
+          gamesNotCompleted: 0,
+          totalWonMs: 5000,
+          fastestWonMs: 5000,
+          lastWinDealId: 'one',
+        },
+        3: {
+          gamesWon: 4,
+          gamesNotCompleted: 2,
+          totalWonMs: 40000,
+          fastestWonMs: 8000,
+          lastWinDealId: 'three',
+        },
+      },
+    }),
+    {
+      byDraw: {
+        1: {
+          gamesWon: 1,
+          gamesNotCompleted: 0,
+          totalWonMs: 5000,
+          fastestWonMs: 5000,
+          lastWinDealId: 'one',
+        },
+        3: {
+          gamesWon: 4,
+          gamesNotCompleted: 2,
+          totalWonMs: 40000,
+          fastestWonMs: 8000,
+          lastWinDealId: 'three',
+        },
+      },
     },
   );
 });

@@ -2,6 +2,7 @@ import {
   FOUNDATION_COUNT,
   SUITS,
   TABLEAU_COUNT,
+  isDrawCount,
   type Card,
   type GameState,
   type Selection,
@@ -43,7 +44,10 @@ export function parseSavedSolitaireGame(data: unknown): SavedSolitaireGame | nul
     return null;
   }
   return {
-    game: data.game,
+    game: {
+      ...data.game,
+      drawCount: data.game.drawCount === 3 ? 3 : 1,
+    },
     elapsedMs: data.elapsedMs,
     dealId: typeof data.dealId === 'string' ? data.dealId : '',
   };
@@ -60,6 +64,9 @@ function isGameState(value: unknown): value is GameState {
     return false;
   }
   if (value.selected !== null && !isSelection(value.selected)) {
+    return false;
+  }
+  if (value.drawCount !== undefined && !isDrawCount(value.drawCount)) {
     return false;
   }
   return true;

@@ -3,6 +3,7 @@ export type Suit = (typeof SUITS)[number];
 
 export const TABLEAU_COUNT = 7;
 export const FOUNDATION_COUNT = 4;
+export type DrawCount = 1 | 3;
 
 export type Card = {
   id: string;
@@ -29,6 +30,7 @@ export type GameState = {
   waste: Card[];
   selected: Selection | null;
   won: boolean;
+  drawCount: DrawCount;
 };
 
 export const RANK_LABELS = ['', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -41,6 +43,10 @@ export const SUIT_LABELS: Record<Suit, string> = {
 
 export function isRed(suit: Suit): boolean {
   return suit === 'hearts' || suit === 'diamonds';
+}
+
+export function isDrawCount(value: unknown): value is DrawCount {
+  return value === 1 || value === 3;
 }
 
 export function formatCard(card: Card): string {
@@ -66,7 +72,7 @@ export function shuffle<T>(items: T[], rng: () => number = Math.random): T[] {
   return next;
 }
 
-export function deal(deck: Card[]): GameState {
+export function deal(deck: Card[], drawCount: DrawCount = 1): GameState {
   const tableau: Card[][] = Array.from({ length: TABLEAU_COUNT }, () => []);
   let cursor = 0;
   for (let pile = 0; pile < TABLEAU_COUNT; pile++) {
@@ -87,11 +93,12 @@ export function deal(deck: Card[]): GameState {
     waste: [],
     selected: null,
     won: false,
+    drawCount,
   };
 }
 
-export function newGame(rng: () => number = Math.random): GameState {
-  return deal(shuffle(createDeck(), rng));
+export function newGame(rng: () => number = Math.random, drawCount: DrawCount = 1): GameState {
+  return deal(shuffle(createDeck(), rng), drawCount);
 }
 
 export function handleClick(state: GameState, target: ClickTarget): GameState {
@@ -183,9 +190,12 @@ export function isWon(state: GameState): boolean {
 function drawFromStock(state: GameState): GameState {
   const next = clone(state);
   if (next.stock.length > 0) {
-    const card = next.stock.pop();
-    if (card) {
-      next.waste.push({ ...card, faceUp: true });
+    const count = Math.min(next.drawCount, next.stock.length);
+    for (let n = 0; n < count; n++) {
+      const card = next.stock.pop();
+      if (card) {
+        next.waste.push({ ...card, faceUp: true });
+      }
     }
     return next;
   }
@@ -323,5 +333,6 @@ function clone(state: GameState): GameState {
     waste: state.waste.map((card) => ({ ...card })),
     selected: state.selected ? { ...state.selected } : null,
     won: state.won,
+    drawCount: state.drawCount,
   };
 }

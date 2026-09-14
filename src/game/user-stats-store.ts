@@ -3,10 +3,11 @@ import { retrieve, store } from '@/storage';
 import {
   applyIncomplete,
   applyWin,
-  EMPTY_USER_STATS,
+  emptyUserStats,
   parseUserStats,
   type UserStats,
 } from './user-stats';
+import type { DrawCount } from './solitaire';
 
 export const USER_STATS_KEY = 'user:stats';
 
@@ -15,15 +16,22 @@ export async function loadUserStats(): Promise<UserStats> {
   return parseUserStats(data);
 }
 
-export async function recordSolitaireWin(dealId: string, elapsedMs: number): Promise<UserStats> {
-  const next = applyWin(await loadUserStats(), elapsedMs, dealId);
+export async function recordSolitaireWin(
+  dealId: string,
+  elapsedMs: number,
+  drawCount: DrawCount = 1,
+): Promise<UserStats> {
+  const next = applyWin(await loadUserStats(), elapsedMs, dealId, drawCount);
   await store(USER_STATS_KEY, next, 'local');
   return next;
 }
 
-export async function recordIncompleteGame(elapsedMs: number): Promise<UserStats> {
+export async function recordIncompleteGame(
+  elapsedMs: number,
+  drawCount: DrawCount = 1,
+): Promise<UserStats> {
   const current = await loadUserStats();
-  const next = applyIncomplete(current, elapsedMs);
+  const next = applyIncomplete(current, elapsedMs, drawCount);
   if (next === current) {
     return current;
   }
@@ -32,7 +40,7 @@ export async function recordIncompleteGame(elapsedMs: number): Promise<UserStats
 }
 
 export async function resetUserStats(): Promise<UserStats> {
-  const next = { ...EMPTY_USER_STATS };
+  const next = emptyUserStats();
   await store(USER_STATS_KEY, next, 'local');
   return next;
 }

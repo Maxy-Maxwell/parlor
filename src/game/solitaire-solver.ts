@@ -257,6 +257,7 @@ function stateKey(state: GameState): string {
   const pile = (cards: GameState['stock']) =>
     cards.map((card) => `${card.id}:${card.faceUp ? '1' : '0'}`).join(',');
   return [
+    String(state.drawCount),
     state.tableau.map(pile).join('|'),
     state.foundations.map(pile).join('|'),
     pile(state.stock),
