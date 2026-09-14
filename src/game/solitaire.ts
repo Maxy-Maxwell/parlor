@@ -91,42 +91,7 @@ export function deal(deck: Card[]): GameState {
 }
 
 export function newGame(rng: () => number = Math.random): GameState {
-  return deal(createSolvableDeck(rng));
-}
-
-/** A-6 in stock, 7-K stacked by suit in the tableau so every deal is winnable. */
-function createSolvableDeck(rng: () => number): Card[] {
-  const suits = shuffle([...SUITS], rng);
-  const stock: Card[] = [];
-  for (const suit of SUITS) {
-    for (let rank = 1; rank <= 6; rank++) {
-      stock.push(makeCard(suit, rank));
-    }
-  }
-
-  const piles = [
-    descendingPile(suits[1], 7, 7),
-    descendingPile(suits[2], 8, 7),
-    descendingPile(suits[3], 9, 7),
-    descendingPile(suits[3], 13, 10),
-    descendingPile(suits[2], 13, 9),
-    descendingPile(suits[1], 13, 8),
-    descendingPile(suits[0], 13, 7),
-  ];
-
-  return [...piles.flat(), ...shuffle(stock, rng)];
-}
-
-function makeCard(suit: Suit, rank: number): Card {
-  return { id: `${suit}-${rank}`, suit, rank, faceUp: false };
-}
-
-function descendingPile(suit: Suit, bottomRank: number, topRank: number): Card[] {
-  const cards: Card[] = [];
-  for (let rank = bottomRank; rank >= topRank; rank--) {
-    cards.push(makeCard(suit, rank));
-  }
-  return cards;
+  return deal(shuffle(createDeck(), rng));
 }
 
 export function handleClick(state: GameState, target: ClickTarget): GameState {

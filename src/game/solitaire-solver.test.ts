@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { applySolveStep, findSolution } from './solitaire-solver.ts';
-import { createDeck, newGame, type Card, type GameState, isWon } from './solitaire.ts';
+import { SUITS, createDeck, deal, type Card, type GameState, isWon } from './solitaire.ts';
 
 function test(name: string, fn: () => void) {
   fn();
@@ -55,16 +55,43 @@ test('reports a buried card with no legal moves as unsolvable', () => {
   assert.equal(findSolution(game), null);
 });
 
-test('newGame deals a layout the solver can finish', () => {
-  for (const seed of [0.11, 0.28, 0.44, 0.63, 0.81]) {
-    const game = newGame(() => seed);
-    const steps = findSolution(game);
-    assert.ok(steps, `expected a solution for seed ${seed}`);
+test('finds a solution for a known-winnable starting layout', () => {
+  const game = deal(solvableDeck());
+  const steps = findSolution(game);
+  assert.ok(steps);
 
-    let current = game;
-    for (const step of steps) {
-      current = applySolveStep(current, step);
-    }
-    assert.ok(isWon(current));
+  let current = game;
+  for (const step of steps) {
+    current = applySolveStep(current, step);
   }
+  assert.ok(isWon(current));
 });
+
+function solvableDeck(): Card[] {
+  const stock: Card[] = [];
+  for (const suit of SUITS) {
+    for (let rank = 1; rank <= 6; rank++) {
+      stock.push(card(suit, rank, false));
+    }
+  }
+
+  const piles = [
+    descendingPile(SUITS[1], 7, 7),
+    descendingPile(SUITS[2], 8, 7),
+    descendingPile(SUITS[3], 9, 7),
+    descendingPile(SUITS[3], 13, 10),
+    descendingPile(SUITS[2], 13, 9),
+    descendingPile(SUITS[1], 13, 8),
+    descendingPile(SUITS[0], 13, 7),
+  ];
+
+  return [...piles.flat(), ...stock];
+}
+
+function descendingPile(suit: Card['suit'], bottomRank: number, topRank: number): Card[] {
+  const cards: Card[] = [];
+  for (let rank = bottomRank; rank >= topRank; rank--) {
+    cards.push(card(suit, rank, false));
+  }
+  return cards;
+}

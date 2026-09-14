@@ -229,4 +229,9 @@ test('newGame deals every card once in a standard Klondike layout', () => {
   assert.equal(game.stock.length, 24);
 });
 
+test('newGame shuffles the full deck instead of stacking a solvable layout', () => {
+  const games = [0.11, 0.28, 0.44, 0.63, 0.81].map((seed) => newGame(() => seed));
+  assert.ok(games.some((game) => game.stock.some((item) => item.rank > 6)));
+});
+
 console.log('all tests passed');
