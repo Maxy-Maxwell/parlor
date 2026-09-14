@@ -54,23 +54,45 @@ test('the same deal is not counted as a win twice', () => {
 
 test('incomplete games are tracked in the win rate', () => {
   const won = applyWin(EMPTY_USER_STATS, 10000, 'deal-a');
-  const mixed = applyIncomplete(applyIncomplete(won, MIN_STATS_GAME_MS), MIN_STATS_GAME_MS);
+  const mixed = applyIncomplete(applyIncomplete(won, MIN_STATS_GAME_MS, 1, true), MIN_STATS_GAME_MS, 1, false);
   assert.equal(mixed.byDraw[1].gamesWon, 1);
   assert.equal(mixed.byDraw[1].gamesNotCompleted, 2);
+  assert.equal(mixed.byDraw[1].gamesNotCompletedSolvable, 1);
+  assert.equal(mixed.byDraw[1].gamesNotCompletedImpossible, 1);
   assert.equal(Math.round(winRatePercent(mixed.byDraw[1]) ?? 0), 33);
   assert.equal(winRatePercent(EMPTY_VARIANT_STATS), null);
 });
 
+test('incomplete games are flagged as solvable or impossible', () => {
+  const solvable = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS, 1, true);
+  assert.equal(solvable.byDraw[1].gamesNotCompletedSolvable, 1);
+  assert.equal(solvable.byDraw[1].gamesNotCompletedImpossible, 0);
+
+  const mixed = applyIncomplete(solvable, MIN_STATS_GAME_MS, 1, false);
+  assert.equal(mixed.byDraw[1].gamesNotCompleted, 2);
+  assert.equal(mixed.byDraw[1].gamesNotCompletedSolvable, 1);
+  assert.equal(mixed.byDraw[1].gamesNotCompletedImpossible, 1);
+
+  const combined = statsForDraws(
+    applyIncomplete(mixed, MIN_STATS_GAME_MS, 3, false),
+    [1, 3],
+  );
+  assert.equal(combined.gamesNotCompletedSolvable, 1);
+  assert.equal(combined.gamesNotCompletedImpossible, 2);
+});
+
 test('incomplete games under 15 seconds are omitted from the tally', () => {
-  const skipped = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS - 1);
+  const skipped = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS - 1, 1, true);
   assert.deepEqual(skipped, EMPTY_USER_STATS);
 
-  const counted = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS);
+  const counted = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS, 1, true);
   assert.equal(counted.byDraw[1].gamesNotCompleted, 1);
+  assert.equal(counted.byDraw[1].gamesNotCompletedSolvable, 1);
   assert.equal(counted.byDraw[3].gamesNotCompleted, 0);
 
-  const mixed = applyIncomplete(applyIncomplete(EMPTY_USER_STATS, 5_000, 3), 20_000, 3);
+  const mixed = applyIncomplete(applyIncomplete(EMPTY_USER_STATS, 5_000, 3, false), 20_000, 3, false);
   assert.equal(mixed.byDraw[3].gamesNotCompleted, 1);
+  assert.equal(mixed.byDraw[3].gamesNotCompletedImpossible, 1);
   assert.equal(mixed.byDraw[1].gamesNotCompleted, 0);
 });
 
@@ -90,6 +112,8 @@ test('parseUserStats falls back to empty stats for invalid payloads', () => {
         1: {
           gamesWon: 2,
           gamesNotCompleted: 1,
+          gamesNotCompletedSolvable: 1,
+          gamesNotCompletedImpossible: 0,
           totalWonMs: 9000,
           fastestWonMs: 3000,
           lastWinDealId: 'deal-a',
@@ -104,6 +128,8 @@ test('parseUserStats falls back to empty stats for invalid payloads', () => {
         1: {
           gamesWon: 1,
           gamesNotCompleted: 0,
+          gamesNotCompletedSolvable: 2,
+          gamesNotCompletedImpossible: 3,
           totalWonMs: 5000,
           fastestWonMs: 5000,
           lastWinDealId: 'one',
@@ -121,7 +147,9 @@ test('parseUserStats falls back to empty stats for invalid payloads', () => {
       byDraw: {
         1: {
           gamesWon: 1,
-          gamesNotCompleted: 0,
+          gamesNotCompleted: 5,
+          gamesNotCompletedSolvable: 2,
+          gamesNotCompletedImpossible: 3,
           totalWonMs: 5000,
           fastestWonMs: 5000,
           lastWinDealId: 'one',
@@ -129,6 +157,8 @@ test('parseUserStats falls back to empty stats for invalid payloads', () => {
         3: {
           gamesWon: 4,
           gamesNotCompleted: 2,
+          gamesNotCompletedSolvable: 2,
+          gamesNotCompletedImpossible: 0,
           totalWonMs: 40000,
           fastestWonMs: 8000,
           lastWinDealId: 'three',

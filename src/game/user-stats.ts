@@ -3,6 +3,8 @@ import type { DrawCount } from './solitaire.ts';
 export type VariantStats = {
   gamesWon: number;
   gamesNotCompleted: number;
+  gamesNotCompletedSolvable: number;
+  gamesNotCompletedImpossible: number;
   totalWonMs: number;
   fastestWonMs: number | null;
   lastWinDealId: string | null;
@@ -18,6 +20,8 @@ export type UserStats = {
 export const EMPTY_VARIANT_STATS: VariantStats = {
   gamesWon: 0,
   gamesNotCompleted: 0,
+  gamesNotCompletedSolvable: 0,
+  gamesNotCompletedImpossible: 0,
   totalWonMs: 0,
   fastestWonMs: null,
   lastWinDealId: null,
@@ -54,8 +58,8 @@ export function applyWin(
 
   const time = Math.max(0, Math.floor(elapsedMs));
   return replaceVariant(stats, drawCount, {
+    ...current,
     gamesWon: current.gamesWon + 1,
-    gamesNotCompleted: current.gamesNotCompleted,
     totalWonMs: current.totalWonMs + time,
     fastestWonMs: current.fastestWonMs == null ? time : Math.min(current.fastestWonMs, time),
     lastWinDealId: dealId.length > 0 ? dealId : current.lastWinDealId,
@@ -66,6 +70,7 @@ export function applyIncomplete(
   stats: UserStats,
   elapsedMs: number,
   drawCount: DrawCount = 1,
+  solvable = true,
 ): UserStats {
   const time = Math.max(0, Math.floor(elapsedMs));
   if (time < MIN_STATS_GAME_MS) {
@@ -73,9 +78,13 @@ export function applyIncomplete(
   }
 
   const current = stats.byDraw[drawCount];
+  const gamesNotCompletedSolvable = current.gamesNotCompletedSolvable + (solvable ? 1 : 0);
+  const gamesNotCompletedImpossible = current.gamesNotCompletedImpossible + (solvable ? 0 : 1);
   return replaceVariant(stats, drawCount, {
     ...current,
-    gamesNotCompleted: current.gamesNotCompleted + 1,
+    gamesNotCompletedSolvable,
+    gamesNotCompletedImpossible,
+    gamesNotCompleted: gamesNotCompletedSolvable + gamesNotCompletedImpossible,
   });
 }
 
@@ -143,9 +152,15 @@ function replaceVariant(stats: UserStats, drawCount: DrawCount, next: VariantSta
 }
 
 function combineVariantStats(left: VariantStats, right: VariantStats): VariantStats {
+  const gamesNotCompletedSolvable =
+    left.gamesNotCompletedSolvable + right.gamesNotCompletedSolvable;
+  const gamesNotCompletedImpossible =
+    left.gamesNotCompletedImpossible + right.gamesNotCompletedImpossible;
   return {
     gamesWon: left.gamesWon + right.gamesWon,
-    gamesNotCompleted: left.gamesNotCompleted + right.gamesNotCompleted,
+    gamesNotCompleted: gamesNotCompletedSolvable + gamesNotCompletedImpossible,
+    gamesNotCompletedSolvable,
+    gamesNotCompletedImpossible,
     totalWonMs: left.totalWonMs + right.totalWonMs,
     fastestWonMs: minTime(left.fastestWonMs, right.fastestWonMs),
     lastWinDealId: right.lastWinDealId ?? left.lastWinDealId,
@@ -168,28 +183,45 @@ function parseVariantStats(data: unknown): VariantStats | null {
   }
 
   const gamesWon = asNonNegativeInt(data.gamesWon);
-  const gamesNotCompleted = asNonNegativeInt(data.gamesNotCompleted);
   const totalWonMs = asNonNegativeInt(data.totalWonMs);
   const fastestWonMs =
     data.fastestWonMs === null ? null : asNonNegativeInt(data.fastestWonMs);
   const lastWinDealId = typeof data.lastWinDealId === 'string' ? data.lastWinDealId : null;
+  const split = parseIncompleteSplit(data);
 
-  if (
-    gamesWon == null ||
-    gamesNotCompleted == null ||
-    totalWonMs == null ||
-    fastestWonMs === undefined
-  ) {
+  if (gamesWon == null || totalWonMs == null || fastestWonMs === undefined || split == null) {
     return null;
   }
 
   return {
     gamesWon,
-    gamesNotCompleted,
+    gamesNotCompleted: split.solvable + split.impossible,
+    gamesNotCompletedSolvable: split.solvable,
+    gamesNotCompletedImpossible: split.impossible,
     totalWonMs,
     fastestWonMs,
     lastWinDealId,
   };
+}
+
+function parseIncompleteSplit(
+  data: Record<string, unknown>,
+): { solvable: number; impossible: number } | null {
+  const solvable = asNonNegativeInt(data.gamesNotCompletedSolvable);
+  const impossible = asNonNegativeInt(data.gamesNotCompletedImpossible);
+  if (solvable != null || impossible != null) {
+    return {
+      solvable: solvable ?? 0,
+      impossible: impossible ?? 0,
+    };
+  }
+
+  const total = asNonNegativeInt(data.gamesNotCompleted);
+  if (total == null) {
+    return null;
+  }
+
+  return { solvable: total, impossible: 0 };
 }
 
 function asNonNegativeInt(value: unknown): number | null {

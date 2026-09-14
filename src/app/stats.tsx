@@ -265,8 +265,16 @@ function SolitaireDashboard({ stats }: { stats: UserStats }) {
         emoji="🎯"
         title="Games Won Vs Not Completed"
         subtitle={gamesPlayedLabel(gamesPlayed)}>
-        <WinRateDoughnut won={visible.gamesWon} unfinished={visible.gamesNotCompleted} />
-        <DoughnutLegend won={visible.gamesWon} unfinished={visible.gamesNotCompleted} />
+        <WinRateDoughnut
+          won={visible.gamesWon}
+          unfinishedSolvable={visible.gamesNotCompletedSolvable}
+          unfinishedImpossible={visible.gamesNotCompletedImpossible}
+        />
+        <DoughnutLegend
+          won={visible.gamesWon}
+          unfinishedSolvable={visible.gamesNotCompletedSolvable}
+          unfinishedImpossible={visible.gamesNotCompletedImpossible}
+        />
       </StatWidget>
 
       <View style={styles.row}>

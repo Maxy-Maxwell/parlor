@@ -263,7 +263,7 @@ export default function SolitaireScreen() {
   const startNewGame = () => {
     abortSolveRef.current = true;
     if (game != null && !game.won) {
-      void recordIncompleteGame(elapsedMs, game.drawCount);
+      void recordIncompleteGame(elapsedMs, game.drawCount, game, unsolvable ? false : undefined);
     }
     leavingRef.current = false;
     setDealId(createDealId());
@@ -691,12 +691,12 @@ export default function SolitaireScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="OK"
+              accessibilityLabel="We'll See About That"
               onPress={() => setUnsolvable(false)}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
                 <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  OK
+                  We'll See About That
                 </ThemedText>
               </ThemedView>
             </Pressable>
