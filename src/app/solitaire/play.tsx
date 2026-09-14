@@ -623,6 +623,17 @@ export default function SolitaireScreen() {
             </ThemedText>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="New game"
+              onPress={startNewGame}
+              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.pauseButton}>
+                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+                  New game
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
               accessibilityLabel="OK"
               onPress={() => setUnsolvable(false)}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>

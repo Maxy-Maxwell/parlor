@@ -168,6 +168,37 @@ function scorecardBlurb(stats: VariantStats): string {
   return 'Every Deal Is A Fresh Chance!';
 }
 
+function FilterChip({
+  label,
+  selected,
+  fill,
+  ink,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  fill: string;
+  ink: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[
+        styles.filter,
+        { backgroundColor: selected ? fill : theme.backgroundElement },
+      ]}>
+      <ThemedText type="small" style={[styles.filterLabel, selected && { color: ink }]}>
+        {label}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
 function SolitaireDashboard({ stats }: { stats: UserStats }) {
   const theme = useTheme();
   const [oneCard, setOneCard] = useState(true);
@@ -198,28 +229,24 @@ function SolitaireDashboard({ stats }: { stats: UserStats }) {
     setThreeCard((value) => !value);
   };
 
+  const dark = theme.background === '#000000';
+  const selectedFill = dark ? '#2A4A6A' : '#D6E8F7';
+  const selectedInk = dark ? '#C9DEF2' : '#1F4E8C';
+
   return (
     <View style={styles.dashboard}>
       <View
         accessibilityRole="toolbar"
         accessibilityLabel="Solitaire stats filters"
-        style={[styles.filters, { backgroundColor: theme.backgroundElement }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="1 Card"
-          accessibilityState={{ selected: oneCard }}
-          onPress={toggleOneCard}
-          style={[styles.filter, oneCard && { backgroundColor: theme.background }]}>
-          <ThemedText type="smallBold">1 Card</ThemedText>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="3 Card"
-          accessibilityState={{ selected: threeCard }}
+        style={styles.filters}>
+        <FilterChip label="1 Card" selected={oneCard} fill={selectedFill} ink={selectedInk} onPress={toggleOneCard} />
+        <FilterChip
+          label="3 Card"
+          selected={threeCard}
+          fill={selectedFill}
+          ink={selectedInk}
           onPress={toggleThreeCard}
-          style={[styles.filter, threeCard && { backgroundColor: theme.background }]}>
-          <ThemedText type="smallBold">3 Card</ThemedText>
-        </Pressable>
+        />
       </View>
 
       <View style={styles.banner}>
@@ -303,17 +330,19 @@ const styles = StyleSheet.create({
   },
   filters: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignSelf: 'stretch',
-    borderRadius: Spacing.three,
-    padding: Spacing.one,
-    gap: Spacing.one,
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   filter: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 10,
+  },
+  filterLabel: {
+    fontSize: 16,
+    lineHeight: 21,
   },
   banner: {
     alignItems: 'center',
