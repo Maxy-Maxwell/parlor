@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { Platform, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -17,13 +18,22 @@ export function goBackOrHome() {
 }
 
 export function StackBackButton({ label = 'Home' }: { label?: string }) {
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
+  const iosLandscapeShift = Platform.OS === 'ios' && landscape ? -insets.left : 0;
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={8}
       onPress={goBackOrHome}
-      style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
+      style={({ pressed }) => [
+        styles.button,
+        iosLandscapeShift !== 0 ? { marginLeft: iosLandscapeShift } : null,
+        pressed && styles.pressed,
+      ]}>
       <ThemedText type="smallBold">{label}</ThemedText>
     </Pressable>
   );
@@ -31,7 +41,8 @@ export function StackBackButton({ label = 'Home' }: { label?: string }) {
 
 const styles = StyleSheet.create({
   button: {
-    paddingHorizontal: Spacing.two,
+    paddingLeft: 0,
+    paddingRight: Spacing.two,
     paddingVertical: Spacing.one,
   },
   pressed: {

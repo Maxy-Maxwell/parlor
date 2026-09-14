@@ -55,9 +55,13 @@ function ThemedRoot() {
           headerTitleStyle: { color: theme.text },
           headerShadowVisible: false,
           contentStyle: { backgroundColor: theme.background },
+          orientation: 'portrait',
         }}>
         <Stack.Screen name="index" options={{ title: 'Home' }} />
-        <Stack.Screen name="solitaire" options={{ headerShown: false, title: 'Solitaire' }} />
+        <Stack.Screen
+          name="solitaire"
+          options={{ headerShown: false, title: 'Solitaire', orientation: 'default' }}
+        />
         <Stack.Screen
           name="stats"
           options={({ navigation }) => screenWithHomeBack(navigation, { title: 'Stats' })}
