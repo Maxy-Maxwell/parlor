@@ -48,6 +48,8 @@ const ROW_GAP = Spacing.four;
 const MIN_CARD_WIDTH = 40;
 const SOLVE_MOVE_DELAY_MS = 1000;
 
+type LeaveConfirm = 'back' | 'newGame';
+
 function firstParam(value?: string | string[]): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -145,6 +147,7 @@ export default function SolitaireScreen() {
   const resume = firstParam(mode) === 'continue';
   const requestedDraw: DrawCount = firstParam(draw) === '3' ? 3 : 1;
   const leavingRef = useRef(false);
+  const pendingLeaveActionRef = useRef<Parameters<(typeof navigation)['dispatch']>[0] | null>(null);
   const abortSolveRef = useRef(false);
   const pulseTokenRef = useRef(0);
   const [solverPulse, setSolverPulse] = useState<{
@@ -152,6 +155,7 @@ export default function SolitaireScreen() {
     ids: ReadonlySet<string>;
   } | null>(null);
   const [paused, setPaused] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState<LeaveConfirm | null>(null);
   const [confirmSolve, setConfirmSolve] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [solving, setSolving] = useState(false);
@@ -163,8 +167,9 @@ export default function SolitaireScreen() {
   const [dealId, setDealId] = useState('');
   const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
-  const busy = confirmSolve || thinking || solving || unsolvable;
-  const timerPaused = game == null || paused || game.won || confirmSolve || unsolvable;
+  const busy = confirmLeave || confirmSolve || thinking || solving || unsolvable;
+  const timerPaused =
+    game == null || paused || game.won || confirmLeave || confirmSolve || unsolvable;
   const elapsedMs = useGameTimer(timerPaused, timerEpoch, timerStartMs);
   const layout = useMemo(
     () => layoutCards(boardSize.width, boardSize.height),
@@ -225,13 +230,10 @@ export default function SolitaireScreen() {
         return;
       }
       event.preventDefault();
-      leavingRef.current = true;
-      abortSolveRef.current = true;
-      void saveSolitaireInProgress(game, elapsedMs, dealId).finally(() => {
-        navigation.dispatch(event.data.action);
-      });
+      pendingLeaveActionRef.current = event.data.action;
+      setConfirmLeave('back');
     });
-  }, [dealId, elapsedMs, game, navigation]);
+  }, [game, navigation]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -290,6 +292,7 @@ export default function SolitaireScreen() {
     setDealId(createDealId());
     setGame(newGame(Math.random, game?.drawCount ?? requestedDraw));
     setPaused(false);
+    setConfirmLeave(null);
     setConfirmSolve(false);
     setThinking(false);
     setSolving(false);
@@ -313,6 +316,42 @@ export default function SolitaireScreen() {
       setAutoSolved(false);
     }
     setPaused(true);
+  };
+
+  const cancelLeave = () => {
+    pendingLeaveActionRef.current = null;
+    setConfirmLeave(null);
+  };
+
+  const requestNewGame = () => {
+    if (game != null && !game.won) {
+      setConfirmLeave('newGame');
+      return;
+    }
+    startNewGame();
+  };
+
+  const saveAndExit = () => {
+    abortSolveRef.current = true;
+    leavingRef.current = true;
+    setConfirmLeave(null);
+    const action = pendingLeaveActionRef.current;
+    pendingLeaveActionRef.current = null;
+    if (game != null && !game.won) {
+      void saveSolitaireInProgress(game, elapsedMs, dealId).finally(() => {
+        if (action) {
+          navigation.dispatch(action);
+          return;
+        }
+        router.replace('/');
+      });
+      return;
+    }
+    if (action) {
+      navigation.dispatch(action);
+      return;
+    }
+    router.replace('/');
   };
 
   const leaveToHome = () => {
@@ -425,15 +464,15 @@ export default function SolitaireScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="New game"
+            accessibilityLabel="New Game"
             disabled={thinking || solving}
-            onPress={startNewGame}
+            onPress={requestNewGame}
             style={({ pressed }) => [
               styles.toolbarButton,
               { backgroundColor: theme.backgroundSelected },
               pressed && styles.pressed,
             ]}>
-            <ThemedText type="smallBold">New game</ThemedText>
+            <ThemedText type="smallBold">New Game</ThemedText>
           </Pressable>
         </View>
       </View>
@@ -590,12 +629,12 @@ export default function SolitaireScreen() {
             )}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="New game"
+              accessibilityLabel="New Game"
               onPress={startNewGame}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
                 <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  New game
+                  New Game
                 </ThemedText>
               </ThemedView>
             </Pressable>
@@ -612,6 +651,12 @@ export default function SolitaireScreen() {
             </Pressable>
           </View>
         </ThemedView>
+      ) : confirmLeave ? (
+        <ConfirmLeaveMenu
+          confirmLabel={confirmLeave === 'newGame' ? 'New Game' : 'Save and Exit'}
+          onCancel={cancelLeave}
+          onConfirm={confirmLeave === 'newGame' ? startNewGame : saveAndExit}
+        />
       ) : unsolvable ? (
         <ThemedView
           style={styles.overlay}
@@ -623,12 +668,12 @@ export default function SolitaireScreen() {
             </ThemedText>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="New game"
+              accessibilityLabel="New Game"
               onPress={startNewGame}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
                 <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  New game
+                  New Game
                 </ThemedText>
               </ThemedView>
             </Pressable>
@@ -702,18 +747,63 @@ export default function SolitaireScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Menu"
+              accessibilityLabel="Save and Exit"
               onPress={leaveToHome}
               style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
               <ThemedView type="backgroundElement" style={styles.pauseButton}>
                 <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  Menu
+                  Save and Exit
                 </ThemedText>
               </ThemedView>
             </Pressable>
           </View>
         </ThemedView>
       ) : null}
+    </ThemedView>
+  );
+}
+
+function ConfirmLeaveMenu({
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ThemedView
+      style={styles.overlay}
+      accessibilityViewIsModal
+      accessibilityLabel="Leave game?">
+      <View style={styles.pauseMenu}>
+        <ThemedText type="subtitle" style={styles.winTitle}>
+          Leave game?
+        </ThemedText>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          onPress={onCancel}
+          style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+          <ThemedView type="backgroundElement" style={styles.pauseButton}>
+            <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+              Cancel
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={confirmLabel}
+          onPress={onConfirm}
+          style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+          <ThemedView type="backgroundElement" style={styles.pauseButton}>
+            <ThemedText type="subtitle" style={styles.menuButtonLabel}>
+              {confirmLabel}
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
+      </View>
     </ThemedView>
   );
 }

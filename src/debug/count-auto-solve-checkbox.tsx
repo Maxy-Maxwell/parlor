@@ -16,7 +16,7 @@ export function CountAutoSolveCheckbox({ value, onValueChange }: CountAutoSolveC
     <Pressable
       accessibilityRole="checkbox"
       accessibilityState={{ checked: value }}
-      accessibilityLabel="Count auto-solve in stats"
+      accessibilityLabel="Count Auto-Solve in Stats"
       onPress={() => onValueChange(!value)}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
       <View
@@ -30,7 +30,7 @@ export function CountAutoSolveCheckbox({ value, onValueChange }: CountAutoSolveC
           </ThemedText>
         ) : null}
       </View>
-      <ThemedText type="small">Count auto-solve in stats</ThemedText>
+      <ThemedText type="small">Count Auto-Solve in Stats</ThemedText>
     </Pressable>
   );
 }
