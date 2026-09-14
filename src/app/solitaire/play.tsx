@@ -167,9 +167,9 @@ export default function SolitaireScreen() {
   const [dealId, setDealId] = useState('');
   const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
-  const busy = confirmLeave || confirmSolve || thinking || solving || unsolvable;
-  const timerPaused =
-    game == null || paused || game.won || confirmLeave || confirmSolve || unsolvable;
+  const overlayOpen = confirmLeave != null || confirmSolve || unsolvable;
+  const busy = overlayOpen || thinking || solving;
+  const timerPaused = game == null || paused || game.won || overlayOpen;
   const elapsedMs = useGameTimer(timerPaused, timerEpoch, timerStartMs);
   const layout = useMemo(
     () => layoutCards(boardSize.width, boardSize.height),
