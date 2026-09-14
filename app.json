@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "parlor",
+    "name": "Parlor Gaming",
     "slug": "parlor",
     "version": "1.0.0",
     "orientation": "default",
@@ -11,7 +11,8 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
-      "package": "com.parlor.app",
+      "package": "com.maxy.parlor",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#1C3634",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -42,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ed533b79-b2e3-41e3-b228-072855e8e9f3"
+      }
+    },
+    "owner": "maxy-maxwell"
   }
 }
