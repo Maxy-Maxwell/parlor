@@ -14,6 +14,9 @@ export const EMPTY_USER_STATS: UserStats = {
   lastWinDealId: null,
 };
 
+/** Incomplete games shorter than this are omitted from the not-completed count and total tally. */
+export const MIN_STATS_GAME_MS = 15_000;
+
 export function applyWin(stats: UserStats, elapsedMs: number, dealId: string): UserStats {
   if (dealId.length > 0 && stats.lastWinDealId === dealId) {
     return stats;
@@ -29,7 +32,12 @@ export function applyWin(stats: UserStats, elapsedMs: number, dealId: string): U
   };
 }
 
-export function applyIncomplete(stats: UserStats): UserStats {
+export function applyIncomplete(stats: UserStats, elapsedMs: number): UserStats {
+  const time = Math.max(0, Math.floor(elapsedMs));
+  if (time < MIN_STATS_GAME_MS) {
+    return stats;
+  }
+
   return {
     ...stats,
     gamesNotCompleted: stats.gamesNotCompleted + 1,

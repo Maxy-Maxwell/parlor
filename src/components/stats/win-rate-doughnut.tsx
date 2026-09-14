@@ -60,28 +60,63 @@ export function WinRateDoughnut({
         ) : null}
       </Svg>
       <View style={styles.center} pointerEvents="none">
-        <ThemedText type="subtitle" style={styles.value}>
-          {label}
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          Win rate
-        </ThemedText>
+        {percent == null ? (
+          <>
+            <ThemedText accessible={false} style={styles.emptyEmoji}>
+              🃏
+            </ThemedText>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Deal In
+            </ThemedText>
+          </>
+        ) : (
+          <>
+            <ThemedText type="subtitle" style={styles.value}>
+              {label}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Win Rate
+            </ThemedText>
+          </>
+        )}
       </View>
     </View>
   );
 }
 
-export function DoughnutLegend() {
+export function DoughnutLegend({
+  won,
+  unfinished,
+}: {
+  won: number;
+  unfinished: number;
+}) {
   const theme = useTheme();
   return (
     <View style={styles.legend}>
       <View style={styles.legendItem}>
         <View style={[styles.swatch, { backgroundColor: WON_COLOR }]} />
-        <ThemedText type="small">Won</ThemedText>
+        <ThemedText accessible={false} style={styles.legendEmoji}>
+          🏆
+        </ThemedText>
+        <ThemedText
+          type="small"
+          accessibilityLabel={`Won ${won}`}
+          style={styles.legendLabel}>
+          Won {won}
+        </ThemedText>
       </View>
       <View style={styles.legendItem}>
         <View style={[styles.swatch, { backgroundColor: theme.textSecondary }]} />
-        <ThemedText type="small">Not completed</ThemedText>
+        <ThemedText accessible={false} style={styles.legendEmoji}>
+          🃏
+        </ThemedText>
+        <ThemedText
+          type="small"
+          accessibilityLabel={`Not Completed ${unfinished}`}
+          style={styles.legendLabel}>
+          Not Completed {unfinished}
+        </ThemedText>
       </View>
     </View>
   );
@@ -100,15 +135,27 @@ const styles = StyleSheet.create({
   value: {
     fontVariant: ['tabular-nums'],
   },
+  emptyEmoji: {
+    fontSize: 28,
+    lineHeight: 34,
+  },
   legend: {
     flexDirection: 'row',
     gap: 16,
     justifyContent: 'center',
+    flexWrap: 'wrap',
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+  },
+  legendEmoji: {
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  legendLabel: {
+    fontVariant: ['tabular-nums'],
   },
   swatch: {
     width: 10,

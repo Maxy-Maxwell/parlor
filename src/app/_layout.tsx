@@ -1,9 +1,15 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { SettingsHeaderRight } from '@/components/settings-button';
+import { SettingsModal } from '@/components/settings-modal';
 import { StackBackButton } from '@/components/stack-back-button';
+import { useTheme } from '@/hooks/use-theme';
+import { UserSettingsProvider, useUserSettings } from '@/hooks/use-user-settings';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -24,13 +30,33 @@ function screenWithHomeBack(
   };
 }
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function ThemedRoot() {
+  const theme = useTheme();
+  const { settings } = useUserSettings();
+  const dark = settings.darkMode;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    document.documentElement.style.backgroundColor = theme.background;
+    document.body.style.backgroundColor = theme.background;
+  }, [theme.background]);
+
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={dark ? DarkTheme : DefaultTheme}>
+      <StatusBar style={dark ? 'light' : 'dark'} />
       <AnimatedSplashOverlay />
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false, title: 'Home' }} />
+      <Stack
+        screenOptions={{
+          headerRight: () => <SettingsHeaderRight />,
+          headerStyle: { backgroundColor: theme.background },
+          headerTintColor: theme.text,
+          headerTitleStyle: { color: theme.text },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: theme.background },
+        }}>
+        <Stack.Screen name="index" options={{ title: 'Home' }} />
         <Stack.Screen name="solitaire" options={{ headerShown: false, title: 'Solitaire' }} />
         <Stack.Screen
           name="stats"
@@ -41,6 +67,15 @@ export default function RootLayout() {
           options={({ navigation }) => screenWithHomeBack(navigation, { title: 'Explore' })}
         />
       </Stack>
+      <SettingsModal />
     </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <UserSettingsProvider>
+      <ThemedRoot />
+    </UserSettingsProvider>
   );
 }

@@ -29,7 +29,7 @@ export default function SolitaireMenuScreen() {
     void (async () => {
       const saved = await loadSolitaireInProgress();
       if (saved) {
-        await recordIncompleteGame();
+        await recordIncompleteGame(saved.elapsedMs);
         await clearSolitaireInProgress();
       }
       router.push({ pathname: '/solitaire/play', params: { mode: 'new' } });

@@ -12,11 +12,12 @@ import {
   averageWonMs,
   EMPTY_USER_STATS,
   type UserStats,
+  winRatePercent,
 } from '@/game/user-stats';
-import { loadUserStats } from '@/game/user-stats-store';
+import { loadUserStats, resetUserStats } from '@/game/user-stats-store';
 import { useTheme } from '@/hooks/use-theme';
 
-const TABS = [{ id: 'solitaire', label: 'Solitaire' }] as const;
+const TABS = [{ id: 'solitaire', label: '♠️  Solitaire' }] as const;
 type DashboardTab = (typeof TABS)[number]['id'];
 
 function formatWonTime(ms: number | null): string {
@@ -30,6 +31,7 @@ export default function StatsScreen() {
   const theme = useTheme();
   const [tab, setTab] = useState<DashboardTab>('solitaire');
   const [stats, setStats] = useState<UserStats>(EMPTY_USER_STATS);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -45,6 +47,13 @@ export default function StatsScreen() {
     }, []),
   );
 
+  const confirmResetStats = () => {
+    void resetUserStats().then((next) => {
+      setStats(next);
+      setConfirmReset(false);
+    });
+  };
+
   return (
     <ThemedView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -58,6 +67,7 @@ export default function StatsScreen() {
                 <Pressable
                   key={item.id}
                   accessibilityRole="tab"
+                  accessibilityLabel="Solitaire"
                   accessibilityState={{ selected }}
                   onPress={() => setTab(item.id)}
                   style={[
@@ -71,47 +81,141 @@ export default function StatsScreen() {
           </View>
 
           {tab === 'solitaire' ? <SolitaireDashboard stats={stats} /> : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Reset Stats"
+            onPress={() => setConfirmReset(true)}
+            style={({ pressed }) => [styles.resetPressable, pressed && styles.pressed]}>
+            <ThemedView type="backgroundElement" style={styles.resetButton}>
+              <ThemedText accessible={false} style={styles.resetEmoji}>
+                🧹
+              </ThemedText>
+              <ThemedText type="smallBold" style={styles.resetLabel}>
+                Reset Stats
+              </ThemedText>
+            </ThemedView>
+          </Pressable>
         </View>
       </ScrollView>
+
+      {confirmReset ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel="Reset Stats?">
+          <View style={styles.confirmMenu}>
+            <ThemedText accessible={false} style={styles.confirmEmoji}>
+              🧹
+            </ThemedText>
+            <ThemedText type="subtitle" style={styles.confirmTitle}>
+              Reset Stats?
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.confirmTitle}>
+              This permanently clears your Solitaire scoreboard. This cannot be undone.
+            </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reset"
+              onPress={confirmResetStats}
+              style={({ pressed }) => [styles.confirmAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.confirmButton}>
+                <ThemedText type="subtitle" style={styles.resetLabel}>
+                  Reset
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Keep Stats"
+              onPress={() => setConfirmReset(false)}
+              style={({ pressed }) => [styles.confirmAction, pressed && styles.pressed]}>
+              <ThemedView type="backgroundElement" style={styles.confirmButton}>
+                <ThemedText type="subtitle" style={styles.resetLabel}>
+                  Keep Stats
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+          </View>
+        </ThemedView>
+      ) : null}
     </ThemedView>
   );
 }
 
+function gamesPlayedLabel(total: number): string {
+  return total === 1 ? '1 Game Played' : `${total} Games Played`;
+}
+
+function scorecardBlurb(stats: UserStats): string {
+  const played = stats.gamesWon + stats.gamesNotCompleted;
+  if (played === 0) {
+    return 'No Hands Yet — Deal A Game!';
+  }
+  const rate = winRatePercent(stats) ?? 0;
+  if (rate >= 75) {
+    return "You're On Fire!";
+  }
+  if (rate >= 50) {
+    return 'Hot Streak Energy!';
+  }
+  if (rate >= 25) {
+    return 'The Cards Will Turn!';
+  }
+  return 'Every Deal Is A Fresh Chance!';
+}
+
 function SolitaireDashboard({ stats }: { stats: UserStats }) {
   const gamesWon = String(stats.gamesWon);
+  const gamesPlayed = stats.gamesWon + stats.gamesNotCompleted;
   const fastest = formatWonTime(stats.fastestWonMs);
   const average = formatWonTime(averageWonMs(stats));
 
   return (
     <View style={styles.dashboard}>
-      <StatWidget title="Games won vs not completed">
+      <View style={styles.banner}>
+        <ThemedText accessible={false} style={styles.suits}>
+          ♠️   ♥️   ♦️   ♣️
+        </ThemedText>
+        <ThemedText type="smallBold" style={styles.bannerTitle}>
+          Klondike Scorecard
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.bannerBlurb}>
+          {scorecardBlurb(stats)}
+        </ThemedText>
+      </View>
+
+      <StatWidget
+        emoji="🎯"
+        title="Games Won Vs Not Completed"
+        subtitle={gamesPlayedLabel(gamesPlayed)}>
         <WinRateDoughnut won={stats.gamesWon} unfinished={stats.gamesNotCompleted} />
-        <DoughnutLegend />
+        <DoughnutLegend won={stats.gamesWon} unfinished={stats.gamesNotCompleted} />
       </StatWidget>
 
       <View style={styles.row}>
-        <StatWidget title="Games won" style={styles.half}>
+        <StatWidget emoji="🏆" title="Games Won" style={styles.half}>
           <ThemedText
             type="subtitle"
-            accessibilityLabel={`Games won ${gamesWon}`}
+            accessibilityLabel={`Games Won ${gamesWon}`}
             style={styles.metric}>
             {gamesWon}
           </ThemedText>
         </StatWidget>
-        <StatWidget title="Fastest win" style={styles.half}>
+        <StatWidget emoji="⚡" title="Fastest Win" style={styles.half}>
           <ThemedText
             type="subtitle"
-            accessibilityLabel={`Fastest win ${fastest}`}
+            accessibilityLabel={`Fastest Win ${fastest}`}
             style={styles.metric}>
             {fastest}
           </ThemedText>
         </StatWidget>
       </View>
 
-      <StatWidget title="Average win time">
+      <StatWidget emoji="🕒" title="Average Win Time">
         <ThemedText
           type="subtitle"
-          accessibilityLabel={`Average win time ${average}`}
+          accessibilityLabel={`Average Win Time ${average}`}
           style={styles.metric}>
           {average}
         </ThemedText>
@@ -148,6 +252,22 @@ const styles = StyleSheet.create({
   dashboard: {
     gap: Spacing.three,
   },
+  banner: {
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.one,
+  },
+  bannerTitle: {
+    letterSpacing: 0.4,
+    fontSize: 16,
+  },
+  suits: {
+    fontSize: 22,
+    lineHeight: 28,
+  },
+  bannerBlurb: {
+    textAlign: 'center',
+  },
   row: {
     flexDirection: 'row',
     gap: Spacing.three,
@@ -157,5 +277,61 @@ const styles = StyleSheet.create({
   },
   metric: {
     fontVariant: ['tabular-nums'],
+  },
+  resetPressable: {
+    alignSelf: 'stretch',
+  },
+  resetButton: {
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Spacing.four,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  resetEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  resetLabel: {
+    textAlign: 'center',
+  },
+  pressed: {
+    opacity: 0.75,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    zIndex: 20,
+  },
+  confirmMenu: {
+    width: '100%',
+    maxWidth: 420,
+    gap: Spacing.three,
+    alignItems: 'center',
+  },
+  confirmTitle: {
+    textAlign: 'center',
+  },
+  confirmEmoji: {
+    fontSize: 48,
+    lineHeight: 56,
+  },
+  confirmAction: {
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  confirmButton: {
+    paddingVertical: Spacing.four,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Spacing.four,
+    alignItems: 'center',
   },
 });

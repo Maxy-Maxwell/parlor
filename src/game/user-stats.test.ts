@@ -5,6 +5,7 @@ import {
   applyWin,
   averageWonMs,
   EMPTY_USER_STATS,
+  MIN_STATS_GAME_MS,
   parseUserStats,
   winRatePercent,
 } from './user-stats.ts';
@@ -36,11 +37,22 @@ test('the same deal is not counted as a win twice', () => {
 
 test('incomplete games are tracked in the win rate', () => {
   const won = applyWin(EMPTY_USER_STATS, 10000, 'deal-a');
-  const mixed = applyIncomplete(applyIncomplete(won));
+  const mixed = applyIncomplete(applyIncomplete(won, MIN_STATS_GAME_MS), MIN_STATS_GAME_MS);
   assert.equal(mixed.gamesWon, 1);
   assert.equal(mixed.gamesNotCompleted, 2);
   assert.equal(Math.round(winRatePercent(mixed) ?? 0), 33);
   assert.equal(winRatePercent(EMPTY_USER_STATS), null);
+});
+
+test('incomplete games under 15 seconds are omitted from the tally', () => {
+  const skipped = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS - 1);
+  assert.deepEqual(skipped, EMPTY_USER_STATS);
+
+  const counted = applyIncomplete(EMPTY_USER_STATS, MIN_STATS_GAME_MS);
+  assert.equal(counted.gamesNotCompleted, 1);
+
+  const mixed = applyIncomplete(applyIncomplete(EMPTY_USER_STATS, 5_000), 20_000);
+  assert.equal(mixed.gamesNotCompleted, 1);
 });
 
 test('parseUserStats falls back to empty stats for invalid payloads', () => {

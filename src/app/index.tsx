@@ -6,5 +6,5 @@ const MENU = [
 ];
 
 export default function HomeScreen() {
-  return <MenuList items={MENU} />;
+  return <MenuList items={MENU} safeArea={false} />;
 }

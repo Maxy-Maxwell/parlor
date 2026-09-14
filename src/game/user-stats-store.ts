@@ -3,6 +3,7 @@ import { retrieve, store } from '@/storage';
 import {
   applyIncomplete,
   applyWin,
+  EMPTY_USER_STATS,
   parseUserStats,
   type UserStats,
 } from './user-stats';
@@ -20,8 +21,18 @@ export async function recordSolitaireWin(dealId: string, elapsedMs: number): Pro
   return next;
 }
 
-export async function recordIncompleteGame(): Promise<UserStats> {
-  const next = applyIncomplete(await loadUserStats());
+export async function recordIncompleteGame(elapsedMs: number): Promise<UserStats> {
+  const current = await loadUserStats();
+  const next = applyIncomplete(current, elapsedMs);
+  if (next === current) {
+    return current;
+  }
+  await store(USER_STATS_KEY, next, 'local');
+  return next;
+}
+
+export async function resetUserStats(): Promise<UserStats> {
+  const next = { ...EMPTY_USER_STATS };
   await store(USER_STATS_KEY, next, 'local');
   return next;
 }
