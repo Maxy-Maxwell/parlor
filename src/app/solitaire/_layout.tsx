@@ -9,12 +9,7 @@ const playOrientation = Device.deviceType === Device.DeviceType.PHONE ? 'landsca
 
 const playScreenOptions = {
   orientation: playOrientation,
-  headerBackVisible: false,
-  unstable_nativeProps: {
-    headerConfig: {
-      disableLeftInsetApplication: true,
-    },
-  },
+  headerShown: false,
 } as const;
 
 export const unstable_settings = {
@@ -44,13 +39,10 @@ export default function SolitaireLayout() {
       />
       <Stack.Screen
         name="play"
-        options={({ navigation }) => ({
+        options={{
           title: 'Solitaire',
-          headerLeft: () => (
-            <StackBackButton label={navigation.canGoBack() ? 'Back' : 'Home'} />
-          ),
           ...playScreenOptions,
-        })}
+        }}
       />
     </Stack>
   );

@@ -17,11 +17,17 @@ export function goBackOrHome() {
   goHome();
 }
 
-export function StackBackButton({ label = 'Home' }: { label?: string }) {
+export function StackBackButton({
+  label = 'Home',
+  inNativeHeader = true,
+}: {
+  label?: string;
+  inNativeHeader?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
-  const iosLandscapeShift = Platform.OS === 'ios' && landscape ? -insets.left : 0;
+  const iosLandscapeShift = inNativeHeader && Platform.OS === 'ios' && landscape ? -insets.left : 0;
 
   return (
     <Pressable
