@@ -8,9 +8,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const IMAGES = join(ROOT, 'assets', 'images');
 const ICON_ASSETS = join(ROOT, 'assets', 'expo.icon', 'Assets');
 
-const FELT = [0x1b, 0x3d, 0x32, 0xff];
+const FELT = [0x1c, 0x36, 0x34, 0xff];
+const CARD_BLUE = [0x5e, 0x82, 0x9c, 0xff];
 const IVORY = [0xf3, 0xed, 0xe3, 0xff];
-const PIP = [0xc6, 0x28, 0x28, 0xff];
 const WHITE = [0xff, 0xff, 0xff, 0xff];
 const CLEAR = [0, 0, 0, 0];
 
@@ -91,8 +91,9 @@ function sdRoundBox(px, py, cx, cy, hw, hh, radius) {
   return Math.hypot(ox, oy) + Math.min(Math.max(dx, dy), 0) - radius;
 }
 
-function sdDiamond(px, py, cx, cy, rx, ry) {
-  return Math.abs(px - cx) / rx + Math.abs(py - cy) / ry - 1;
+function sdAnnulus(px, py, cx, cy, rOuter, rInner) {
+  const d = Math.hypot(px - cx, py - cy);
+  return Math.max(d - rOuter, rInner - d);
 }
 
 function coverage(distance) {
@@ -108,38 +109,78 @@ function cardGeometry(size, scale) {
     hw: width / 2,
     hh: height / 2,
     radius: width * 0.1,
-    pipCx: size / 2 - width / 2 + width * 0.24,
-    pipCy: size / 2 - height / 2 + height * 0.2,
-    pipRx: width * 0.09,
-    pipRy: height * 0.075,
     width,
     height,
   };
 }
 
-function drawCard(dst, size, scale, cardColor, pipColor, cutoutPip) {
+function monogramGeometry(width, height) {
+  const sw = width * 0.155;
+  const rOuter = width * 0.215;
+  const h = height * 0.455;
+  const rInner = Math.max(width * 0.04, rOuter - sw * 0.92);
+  const left = (width - (sw + rOuter)) / 2 + width * 0.02;
+  const top = (height - h) / 2;
+  return {
+    sw,
+    r: sw / 2,
+    rOuter,
+    rInner,
+    h,
+    left,
+    top,
+    stemRight: left + sw,
+    bowlCx: left + sw,
+    bowlCy: top + rOuter,
+    bottom: top + h,
+  };
+}
+
+function sdLetterP(px, py, originX, originY, m) {
+  const x0 = originX + m.left;
+  const y0 = originY + m.top;
+  const dStem = sdRoundBox(px, py, x0 + m.sw / 2, y0 + m.h / 2, m.sw / 2, m.h / 2, m.r);
+  const dBowl = Math.max(
+    sdAnnulus(px, py, originX + m.bowlCx, originY + m.bowlCy, m.rOuter, m.rInner),
+    x0 - px,
+  );
+  return Math.min(dStem, dBowl);
+}
+
+function drawCardBack(dst, size, scale, cardColor, inkColor, cutoutMark) {
   const g = cardGeometry(size, scale);
+  const originX = g.cx - g.hw;
+  const originY = g.cy - g.hh;
+  const m = monogramGeometry(g.width, g.height);
+  const inset = g.width * 0.11;
+  const thickness = Math.max(1.15, g.width * 0.038);
+  const frameHw = g.hw - inset;
+  const frameHh = g.hh - inset;
+  const frameRadius = Math.max(1, g.radius - inset * 0.4);
+
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const px = x + 0.5;
       const py = y + 0.5;
       const card = coverage(sdRoundBox(px, py, g.cx, g.cy, g.hw, g.hh, g.radius));
-      const pip = coverage(sdDiamond(px, py, g.pipCx, g.pipCy, g.pipRx, g.pipRy) * Math.min(g.pipRx, g.pipRy));
-      if (cutoutPip) {
-        mix(dst, x, y, size, cardColor, Math.max(0, card - pip));
+      const mark = coverage(sdLetterP(px, py, originX, originY, m));
+      if (cutoutMark) {
+        mix(dst, x, y, size, cardColor, Math.max(0, card - mark));
       } else {
+        const frame = coverage(Math.abs(sdRoundBox(px, py, g.cx, g.cy, frameHw, frameHh, frameRadius)) - thickness / 2);
         mix(dst, x, y, size, cardColor, card);
-        mix(dst, x, y, size, pipColor, pip);
+        mix(dst, x, y, size, inkColor, frame * card);
+        mix(dst, x, y, size, inkColor, mark * card);
       }
     }
   }
 }
 
-function render({ size, scale, background, cardColor, pipColor, cutoutPip }) {
+function render({ size, scale, background, cardColor, inkColor, cutoutMark }) {
   const dst = Buffer.alloc(size * size * 4);
   if (background) fill(dst, size, size, background);
   else fill(dst, size, size, CLEAR);
-  if (scale > 0) drawCard(dst, size, scale, cardColor, pipColor, cutoutPip);
+  if (scale > 0) drawCardBack(dst, size, scale, cardColor, inkColor, cutoutMark);
   return encodePng(size, size, dst);
 }
 
@@ -158,8 +199,30 @@ function roundedRectPath(x, y, w, h, r) {
   ].join(' ');
 }
 
-function diamondPath(cx, cy, rx, ry) {
-  return `M ${cx} ${cy - ry} L ${cx + rx} ${cy} L ${cx} ${cy + ry} L ${cx - rx} ${cy} Z`;
+function letterPPath(width, height) {
+  const m = monogramGeometry(width, height);
+  const x0 = m.left;
+  const y0 = m.top;
+  const x1 = m.stemRight;
+  const y1 = m.bottom;
+  const outer = [
+    `M ${x0} ${y0 + m.r}`,
+    `A ${m.r} ${m.r} 0 0 1 ${x0 + m.r} ${y0}`,
+    `H ${x1}`,
+    `A ${m.rOuter} ${m.rOuter} 0 0 1 ${x1} ${y0 + 2 * m.rOuter}`,
+    `V ${y1 - m.r}`,
+    `A ${m.r} ${m.r} 0 0 1 ${x1 - m.r} ${y1}`,
+    `H ${x0 + m.r}`,
+    `A ${m.r} ${m.r} 0 0 1 ${x0} ${y1 - m.r}`,
+    'Z',
+  ].join(' ');
+  const hole = [
+    `M ${m.bowlCx - m.rInner} ${m.bowlCy}`,
+    `A ${m.rInner} ${m.rInner} 0 1 0 ${m.bowlCx + m.rInner} ${m.bowlCy}`,
+    `A ${m.rInner} ${m.rInner} 0 1 0 ${m.bowlCx - m.rInner} ${m.bowlCy}`,
+    'Z',
+  ].join(' ');
+  return `${outer} ${hole}`;
 }
 
 function iosComposerSvg() {
@@ -167,10 +230,10 @@ function iosComposerSvg() {
   const height = 560;
   const radius = 44;
   const card = roundedRectPath(0, 0, width, height, radius);
-  const pip = diamondPath(width * 0.24, height * 0.2, width * 0.09, height * 0.075);
+  const mark = letterPPath(width, height);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none">
-  <path fill="white" fill-rule="evenodd" d="${card} ${pip}"/>
+  <path fill="white" fill-rule="evenodd" d="${card} ${mark}"/>
 </svg>
 `;
 }
@@ -187,31 +250,31 @@ mkdirSync(ICON_ASSETS, { recursive: true });
 
 writePng(
   'assets/images/icon.png',
-  render({ size: 1024, scale: 0.62, background: FELT, cardColor: IVORY, pipColor: PIP, cutoutPip: false }),
+  render({ size: 1024, scale: 0.62, background: FELT, cardColor: CARD_BLUE, inkColor: IVORY, cutoutMark: false }),
 );
 writePng(
   'assets/images/android-icon-foreground.png',
-  render({ size: 1024, scale: 0.52, background: null, cardColor: IVORY, pipColor: PIP, cutoutPip: false }),
+  render({ size: 1024, scale: 0.52, background: null, cardColor: CARD_BLUE, inkColor: IVORY, cutoutMark: false }),
 );
 writePng(
   'assets/images/android-icon-background.png',
-  render({ size: 1024, scale: 0, background: FELT, cardColor: CLEAR, pipColor: CLEAR, cutoutPip: false }),
+  render({ size: 1024, scale: 0, background: FELT, cardColor: CLEAR, inkColor: CLEAR, cutoutMark: false }),
 );
 writePng(
   'assets/images/android-icon-monochrome.png',
-  render({ size: 1024, scale: 0.52, background: null, cardColor: WHITE, pipColor: WHITE, cutoutPip: true }),
+  render({ size: 1024, scale: 0.52, background: null, cardColor: WHITE, inkColor: WHITE, cutoutMark: true }),
 );
 writePng(
   'assets/images/splash-icon.png',
-  render({ size: 1024, scale: 0.72, background: null, cardColor: IVORY, pipColor: PIP, cutoutPip: false }),
+  render({ size: 1024, scale: 0.72, background: null, cardColor: CARD_BLUE, inkColor: IVORY, cutoutMark: false }),
 );
 writePng(
   'assets/images/favicon.png',
-  render({ size: 48, scale: 0.72, background: FELT, cardColor: IVORY, pipColor: PIP, cutoutPip: false }),
+  render({ size: 48, scale: 0.72, background: FELT, cardColor: CARD_BLUE, inkColor: IVORY, cutoutMark: false }),
 );
 writePng(
   'assets/images/logo.png',
-  render({ size: 1024, scale: 0.72, background: null, cardColor: IVORY, pipColor: PIP, cutoutPip: false }),
+  render({ size: 1024, scale: 0.72, background: null, cardColor: CARD_BLUE, inkColor: IVORY, cutoutMark: false }),
 );
 
 writeFileSync(join(ICON_ASSETS, 'card-mark.svg'), iosComposerSvg());
