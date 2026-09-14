@@ -5,6 +5,7 @@ import {
   canPlaceOnTableau,
   handleClick,
   isValidRun,
+  type Card,
   type ClickTarget,
   type GameState,
 } from './solitaire.ts';
@@ -13,8 +14,9 @@ export type SolveStep =
   | { type: 'draw' }
   | { type: 'move'; from: ClickTarget; to: ClickTarget };
 
-const SEARCH_LIMIT = 80_000;
+const SEARCH_LIMIT = 40_000;
 const MAX_PATH = 500;
+const MAX_FRONTIER = 8_000;
 
 export function findSolution(state: GameState): SolveStep[] | null {
   const start = deselect(state);
@@ -27,12 +29,7 @@ export function findSolution(state: GameState): SolveStep[] | null {
     return greedy;
   }
 
-  const path: SolveStep[] = [];
-  const visited = new Set<string>();
-  if (search(start, path, visited, 0)) {
-    return [...path];
-  }
-  return null;
+  return searchBestFirst(start);
 }
 
 export function applySolveStep(state: GameState, step: SolveStep): GameState {
@@ -44,9 +41,10 @@ export function applySolveStep(state: GameState, step: SolveStep): GameState {
 }
 
 function playGreedy(start: GameState): SolveStep[] | null {
-  const path: SolveStep[] = [];
+  const opened = autoplay(start);
+  const path: SolveStep[] = [...opened.steps];
   const visited = new Set<string>();
-  let current = start;
+  let current = opened.state;
   let idleDraws = 0;
 
   while (!current.won) {
@@ -61,10 +59,12 @@ function playGreedy(start: GameState): SolveStep[] | null {
     let next: GameState | null = null;
     for (const candidate of moves) {
       const applied = applySolveStep(current, candidate);
-      const nextKey = stateKey(applied);
+      const extra = autoplay(applied);
+      const nextKey = stateKey(extra.state);
       if (nextKey !== key && !visited.has(nextKey)) {
         step = candidate;
-        next = applied;
+        next = extra.state;
+        path.push(candidate, ...extra.steps);
         break;
       }
     }
@@ -72,7 +72,6 @@ function playGreedy(start: GameState): SolveStep[] | null {
       return null;
     }
 
-    path.push(step);
     idleDraws = step.type === 'draw' ? idleDraws + 1 : 0;
     if (idleDraws > current.stock.length + current.waste.length + 1) {
       return null;
@@ -83,41 +82,212 @@ function playGreedy(start: GameState): SolveStep[] | null {
   return path;
 }
 
-function search(
-  state: GameState,
-  path: SolveStep[],
-  visited: Set<string>,
-  idleDraws: number,
-): boolean {
-  if (state.won) {
-    return true;
-  }
-  if (path.length >= MAX_PATH || visited.size >= SEARCH_LIMIT) {
-    return false;
+type SearchNode = {
+  state: GameState;
+  stepsFromParent: SolveStep[];
+  parent: SearchNode | null;
+  depth: number;
+  priority: number;
+};
+
+function searchBestFirst(start: GameState): SolveStep[] | null {
+  const opened = autoplay(start);
+  if (opened.state.won) {
+    return opened.steps;
   }
 
-  const key = stateKey(state);
-  if (visited.has(key)) {
-    return false;
-  }
-  visited.add(key);
+  const visited = new Set<string>([stateKey(opened.state)]);
+  const heap = new MaxHeap<SearchNode>();
+  let seq = 0;
 
-  for (const step of orderedMoves(state)) {
-    if (step.type === 'draw' && idleDraws > state.stock.length + state.waste.length + 1) {
+  heap.push({
+    state: opened.state,
+    stepsFromParent: opened.steps,
+    parent: null,
+    depth: opened.steps.length,
+    priority: heuristic(opened.state) * 1_000_000 - seq++,
+  });
+
+  while (heap.size > 0 && visited.size < SEARCH_LIMIT) {
+    const node = heap.pop();
+    if (!node) {
+      break;
+    }
+    if (node.state.won) {
+      return reconstruct(node);
+    }
+    if (node.depth >= MAX_PATH) {
       continue;
     }
-    const next = applySolveStep(state, step);
-    if (stateKey(next) === key) {
-      continue;
+
+    for (const step of orderedMoves(node.state)) {
+      const applied = applySolveStep(node.state, step);
+      if (stateKey(applied) === stateKey(node.state)) {
+        continue;
+      }
+      const extra = autoplay(applied);
+      const key = stateKey(extra.state);
+      if (visited.has(key)) {
+        continue;
+      }
+      visited.add(key);
+      const next: SearchNode = {
+        state: extra.state,
+        stepsFromParent: [step, ...extra.steps],
+        parent: node,
+        depth: node.depth + 1 + extra.steps.length,
+        priority: heuristic(extra.state) * 1_000_000 - seq++,
+      };
+      if (extra.state.won) {
+        return reconstruct(next);
+      }
+      heap.push(next);
     }
-    path.push(step);
-    if (search(next, path, visited, step.type === 'draw' ? idleDraws + 1 : 0)) {
-      return true;
+
+    if (heap.size > MAX_FRONTIER) {
+      heap.trim(Math.floor(MAX_FRONTIER / 2));
     }
-    path.pop();
   }
 
-  return false;
+  return null;
+}
+
+function autoplay(state: GameState): { state: GameState; steps: SolveStep[] } {
+  const steps: SolveStep[] = [];
+  let current = state;
+  while (!current.won) {
+    const move = nextSafeFoundationMove(current);
+    if (!move) {
+      break;
+    }
+    const next = applySolveStep(current, move);
+    if (stateKey(next) === stateKey(current)) {
+      break;
+    }
+    steps.push(move);
+    current = next;
+  }
+  return { state: current, steps };
+}
+
+function nextSafeFoundationMove(state: GameState): SolveStep | null {
+  for (const step of generateMoves(state)) {
+    if (step.type !== 'move' || step.to.zone !== 'foundation') {
+      continue;
+    }
+    const card = cardAt(state, step.from);
+    if (card && card.rank <= 2) {
+      return step;
+    }
+  }
+  return null;
+}
+
+function cardAt(state: GameState, from: ClickTarget): Card | undefined {
+  if (from.zone === 'waste') {
+    return state.waste[state.waste.length - 1];
+  }
+  if (from.zone === 'foundation') {
+    const pile = state.foundations[from.pile];
+    return pile[pile.length - 1];
+  }
+  if (from.zone === 'tableau' && from.index != null) {
+    return state.tableau[from.pile][from.index];
+  }
+  return undefined;
+}
+
+function heuristic(state: GameState): number {
+  let foundations = 0;
+  let faceDown = 0;
+  for (const pile of state.foundations) {
+    foundations += pile.length;
+  }
+  for (const pile of state.tableau) {
+    for (const card of pile) {
+      if (!card.faceUp) {
+        faceDown += 1;
+      }
+    }
+  }
+  return foundations * 100 - faceDown;
+}
+
+function reconstruct(node: SearchNode): SolveStep[] {
+  const chunks: SolveStep[][] = [];
+  let current: SearchNode | null = node;
+  while (current) {
+    chunks.push(current.stepsFromParent);
+    current = current.parent;
+  }
+  return chunks.reverse().flat();
+}
+
+class MaxHeap<T extends { priority: number }> {
+  private readonly items: T[] = [];
+
+  get size(): number {
+    return this.items.length;
+  }
+
+  push(item: T) {
+    this.items.push(item);
+    this.bubbleUp(this.items.length - 1);
+  }
+
+  pop(): T | undefined {
+    if (this.items.length === 0) {
+      return undefined;
+    }
+    const top = this.items[0];
+    const last = this.items.pop();
+    if (last && this.items.length > 0) {
+      this.items[0] = last;
+      this.bubbleDown(0);
+    }
+    return top;
+  }
+
+  trim(keep: number) {
+    if (this.items.length <= keep) {
+      return;
+    }
+    this.items.sort((a, b) => b.priority - a.priority);
+    this.items.length = keep;
+    for (let i = Math.floor(this.items.length / 2) - 1; i >= 0; i--) {
+      this.bubbleDown(i);
+    }
+  }
+
+  private bubbleUp(index: number) {
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.items[parent].priority >= this.items[index].priority) {
+        return;
+      }
+      [this.items[parent], this.items[index]] = [this.items[index], this.items[parent]];
+      index = parent;
+    }
+  }
+
+  private bubbleDown(index: number) {
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let best = index;
+      if (left < this.items.length && this.items[left].priority > this.items[best].priority) {
+        best = left;
+      }
+      if (right < this.items.length && this.items[right].priority > this.items[best].priority) {
+        best = right;
+      }
+      if (best === index) {
+        return;
+      }
+      [this.items[best], this.items[index]] = [this.items[index], this.items[best]];
+      index = best;
+    }
+  }
 }
 
 function orderedMoves(state: GameState): SolveStep[] {
@@ -207,7 +377,7 @@ function addTableauMoves(
 
 function scoreMove(state: GameState, step: SolveStep): number {
   if (step.type === 'draw') {
-    return 40;
+    return 2;
   }
   if (step.to.zone === 'foundation') {
     return 100 + (revealsCard(state, step.from) ? 40 : 0);

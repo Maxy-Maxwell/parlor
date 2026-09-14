@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import {
   BASE_CARD_WIDTH,
@@ -167,8 +167,8 @@ export default function SolitaireScreen() {
   const [dealId, setDealId] = useState('');
   const [game, setGame] = useState<GameState | null>(null);
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
-  const overlayOpen = confirmLeave != null || confirmSolve || unsolvable;
-  const busy = overlayOpen || thinking || solving;
+  const overlayOpen = confirmLeave != null || confirmSolve || unsolvable || thinking;
+  const busy = overlayOpen || solving;
   const timerPaused = game == null || paused || game.won || overlayOpen;
   const elapsedMs = useGameTimer(timerPaused, timerEpoch, timerStartMs);
   const layout = useMemo(
@@ -380,7 +380,7 @@ export default function SolitaireScreen() {
     setAutoSolved(true);
     setThinking(true);
 
-    setTimeout(() => {
+    const runSearch = () => {
       if (abortSolveRef.current) {
         return;
       }
@@ -424,7 +424,12 @@ export default function SolitaireScreen() {
         }
         setSolving(false);
       })();
-    }, 50);
+    };
+
+    // Let the loading overlay paint before the blocking search.
+    requestAnimationFrame(() => {
+      setTimeout(runSearch, 50);
+    });
   };
 
   if (game == null) {
@@ -726,6 +731,21 @@ export default function SolitaireScreen() {
                 </ThemedText>
               </ThemedView>
             </Pressable>
+          </View>
+        </ThemedView>
+      ) : thinking ? (
+        <ThemedView
+          style={styles.overlay}
+          accessibilityViewIsModal
+          accessibilityLabel="Looking for a solution">
+          <View style={styles.pauseMenu}>
+            <ActivityIndicator size="large" color={theme.text} />
+            <ThemedText type="subtitle" style={styles.winTitle}>
+              Looking for a solution…
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.winTitle}>
+              This can take a little while.
+            </ThemedText>
           </View>
         </ThemedView>
       ) : paused ? (

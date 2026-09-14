@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { applySolveStep, findSolution } from './solitaire-solver.ts';
-import { SUITS, createDeck, deal, type Card, type GameState, isWon } from './solitaire.ts';
+import { SUITS, createDeck, deal, newGame, type Card, type GameState, isWon } from './solitaire.ts';
 
 function test(name: string, fn: () => void) {
   fn();
@@ -55,6 +55,25 @@ test('reports a buried card with no legal moves as unsolvable', () => {
 
   assert.equal(findSolution(game), null);
 });
+
+test('finds a solution for a shuffled one-card deal', () => {
+  const game = newGame(rng(12345), 1);
+  const steps = findSolution(game);
+  assert.ok(steps);
+
+  let current = game;
+  for (const step of steps) {
+    current = applySolveStep(current, step);
+  }
+  assert.ok(isWon(current));
+});
+
+function rng(seed: number) {
+  return () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+}
 
 test('finds a solution for a known-winnable starting layout', () => {
   const game = deal(solvableDeck());
