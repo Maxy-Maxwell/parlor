@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -11,15 +11,15 @@ import {
   FACE_UP_PEEK_RATIO,
   SolitaireCard,
 } from '@/components/playing-card';
+import { ConfettiBurst } from '@/components/confetti-burst';
+import { SettingsHeaderRight } from '@/components/settings-button';
 import {
   SOLVER_ACTION_AT_MS,
   SOLVER_RING_MS,
   SlotAnchor,
   SlotBoard,
-  SlotBoardScrollView,
   solverSlotId,
 } from '@/components/solver-click-ring';
-import { SettingsHeaderRight } from '@/components/settings-button';
 import { StackBackButton } from '@/components/stack-back-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -171,6 +171,8 @@ export default function SolitaireScreen() {
   const [solving, setSolving] = useState(false);
   const [unsolvable, setUnsolvable] = useState(false);
   const [autoSolved, setAutoSolved] = useState(false);
+  const [confettiBursts, setConfettiBursts] = useState<number[]>([]);
+  const confettiSeqRef = useRef(0);
   const [countAutoSolveWins, setCountAutoSolveWinsState] = useState(getCountAutoSolveWins);
   const [timerEpoch, setTimerEpoch] = useState(0);
   const [timerStartMs, setTimerStartMs] = useState(0);
@@ -204,6 +206,16 @@ export default function SolitaireScreen() {
       setHelpOpen(false);
     }
   }, [game?.won, overlayOpen, paused]);
+
+  useEffect(() => {
+    if (game?.won) {
+      confettiSeqRef.current += 1;
+      const id = confettiSeqRef.current;
+      setConfettiBursts((bursts) => [...bursts, id]);
+    } else {
+      setConfettiBursts([]);
+    }
+  }, [game?.won]);
 
   useEffect(() => {
     let cancelled = false;
@@ -480,7 +492,6 @@ export default function SolitaireScreen() {
         <View style={styles.board}>
           <SlotBoard
             pulse={solverPulse}
-            stickyOffset={headerHeight}
             style={styles.boardInner}
             onLayout={(event) => {
               const { width, height } = event.nativeEvent.layout;
@@ -488,7 +499,7 @@ export default function SolitaireScreen() {
                 current.width === width && current.height === height ? current : { width, height },
               );
             }}>
-            <SlotBoardScrollView
+            <ScrollView
               style={styles.tableauArea}
               contentContainerStyle={[
                 styles.tableauScrollContent,
@@ -510,7 +521,7 @@ export default function SolitaireScreen() {
                     {game.foundations.map((pile, pileIndex) => {
                       const top = pile[pile.length - 1];
                       return (
-                        <SlotAnchor key={`foundation-${pileIndex}`} slotId={`foundation-${pileIndex}`} sticky>
+                        <SlotAnchor key={`foundation-${pileIndex}`} slotId={`foundation-${pileIndex}`}>
                           <SolitaireCard
                             width={layout.cardWidth}
                             card={top}
@@ -528,7 +539,7 @@ export default function SolitaireScreen() {
 
                   <View style={[styles.stockWaste, { gap: layout.columnGap }]}>
                     <WastePile game={game} layout={layout} onPress={() => play({ zone: 'waste' })} />
-                    <SlotAnchor slotId="stock" sticky>
+                    <SlotAnchor slotId="stock">
                       <SolitaireCard
                         width={layout.cardWidth}
                         faceDown={game.stock.length > 0}
@@ -570,8 +581,9 @@ export default function SolitaireScreen() {
                       </SlotAnchor>
                     ) : (
                       pile.map((item, index) => (
-                        <View
+                        <SlotAnchor
                           key={item.id}
+                          slotId={`tableau-${pileIndex}-${index}`}
                           style={[
                             styles.stackedCard,
                             {
@@ -581,27 +593,25 @@ export default function SolitaireScreen() {
                               height: layout.cardHeight,
                             },
                           ]}>
-                          <SlotAnchor slotId={`tableau-${pileIndex}-${index}`}>
-                            <SolitaireCard
-                              width={layout.cardWidth}
-                              card={item.faceUp ? item : undefined}
-                              faceDown={!item.faceUp}
-                              selected={isCardSelected(game, { zone: 'tableau', pile: pileIndex, index })}
-                              accessibilityLabel={
-                                item.faceUp
-                                  ? `Tableau ${formatCard(item)}`
-                                  : `Face-down card in pile ${pileIndex + 1}`
-                              }
-                              onPress={() => play({ zone: 'tableau', pile: pileIndex, index })}
-                            />
-                          </SlotAnchor>
-                        </View>
+                          <SolitaireCard
+                            width={layout.cardWidth}
+                            card={item.faceUp ? item : undefined}
+                            faceDown={!item.faceUp}
+                            selected={isCardSelected(game, { zone: 'tableau', pile: pileIndex, index })}
+                            accessibilityLabel={
+                              item.faceUp
+                                ? `Tableau ${formatCard(item)}`
+                                : `Face-down card in pile ${pileIndex + 1}`
+                            }
+                            onPress={() => play({ zone: 'tableau', pile: pileIndex, index })}
+                          />
+                        </SlotAnchor>
                       ))
                     )}
                   </View>
                 ))}
               </View>
-            </SlotBoardScrollView>
+            </ScrollView>
           </SlotBoard>
         </View>
       </SafeAreaView>
@@ -615,55 +625,78 @@ export default function SolitaireScreen() {
       ) : null}
 
       {game.won ? (
-        <ThemedView
-          style={styles.overlay}
-          accessibilityViewIsModal
-          accessibilityLabel={
-            hideTimer
-              ? autoSolved
-                ? 'Solved'
-                : 'You won'
-              : autoSolved
-                ? `Solved in ${timeLabel}`
-                : `You won in ${timeLabel}`
-          }>
-          <View style={styles.pauseMenu}>
-            <ThemedText type="subtitle" style={styles.winTitle}>
-              {autoSolved ? 'Solved' : 'You won'}
-            </ThemedText>
-            {hideTimer ? null : (
-              <ThemedText
-                type="title"
-                accessibilityRole="timer"
-                accessibilityLabel={`Final time ${timeLabel}`}
-                style={styles.winTime}>
-                {timeLabel}
+        <>
+          <ThemedView
+            style={styles.overlay}
+            accessibilityViewIsModal
+            accessibilityLabel={
+              hideTimer
+                ? autoSolved
+                  ? 'Solved!'
+                  : 'You won!'
+                : autoSolved
+                  ? `Solved in ${timeLabel}`
+                  : `You won in ${timeLabel}`
+            }>
+            <View style={styles.winMenu}>
+              <ThemedText type="subtitle" style={styles.winTitle}>
+                {autoSolved ? 'Solved' : 'You won'}
               </ThemedText>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New Game"
-              onPress={startNewGame}
-              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
-              <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  New Game
+              {hideTimer ? null : (
+                <ThemedText
+                  type="title"
+                  accessibilityRole="timer"
+                  accessibilityLabel={`Final time ${timeLabel}`}
+                  style={styles.winTime}>
+                  {timeLabel}
                 </ThemedText>
-              </ThemedView>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Menu"
-              onPress={leaveToHome}
-              style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
-              <ThemedView type="backgroundElement" style={styles.pauseButton}>
-                <ThemedText type="subtitle" style={styles.menuButtonLabel}>
-                  Menu
-                </ThemedText>
-              </ThemedView>
-            </Pressable>
-          </View>
-        </ThemedView>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New Game"
+                onPress={startNewGame}
+                style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+                <ThemedView type="backgroundElement" style={styles.winButton}>
+                  <ThemedText type="subtitle" style={styles.winButtonLabel}>
+                    New Game
+                  </ThemedText>
+                </ThemedView>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Menu"
+                onPress={leaveToHome}
+                style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+                <ThemedView type="backgroundElement" style={styles.winButton}>
+                  <ThemedText type="subtitle" style={styles.winButtonLabel}>
+                    Menu
+                  </ThemedText>
+                </ThemedView>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Show Me Confetti!"
+                onPress={() => {
+                  confettiSeqRef.current += 1;
+                  const id = confettiSeqRef.current;
+                  setConfettiBursts((bursts) => [...bursts, id]);
+                }}
+                style={({ pressed }) => [styles.pauseAction, pressed && styles.pressed]}>
+                <ThemedView type="backgroundElement" style={styles.winButton}>
+                  <ThemedText type="subtitle" style={styles.winButtonLabel}>
+                    Show Me Confetti!
+                  </ThemedText>
+                </ThemedView>
+              </Pressable>
+            </View>
+          </ThemedView>
+          {confettiBursts.map((id) => (
+            <ConfettiBurst
+              key={id}
+              onComplete={() => setConfettiBursts((bursts) => bursts.filter((burstId) => burstId !== id))}
+            />
+          ))}
+        </>
       ) : confirmLeave ? (
         <ConfirmLeaveMenu
           confirmLabel={confirmLeave === 'newGame' ? 'New Game' : 'Save and Exit'}
@@ -1074,7 +1107,7 @@ function WastePile({
   if (visible.length === 0) {
     return (
       <View style={{ width, height: layout.cardHeight }}>
-        <SlotAnchor slotId="waste" sticky>
+        <SlotAnchor slotId="waste">
           <SolitaireCard
             width={layout.cardWidth}
             emptyHint="W"
@@ -1112,7 +1145,7 @@ function WastePile({
                 height: layout.cardHeight,
               },
             ]}>
-            {top ? <SlotAnchor slotId="waste" sticky>{face}</SlotAnchor> : face}
+            {top ? <SlotAnchor slotId="waste">{face}</SlotAnchor> : face}
           </View>
         );
       })}
@@ -1191,6 +1224,12 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     alignItems: 'center',
   },
+  winMenu: {
+    width: '100%',
+    maxWidth: 420,
+    gap: Spacing.two,
+    alignItems: 'center',
+  },
   winTitle: {
     textAlign: 'center',
   },
@@ -1207,6 +1246,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     borderRadius: Spacing.four,
     alignItems: 'center',
+  },
+  winButton: {
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Spacing.three,
+    alignItems: 'center',
+  },
+  winButtonLabel: {
+    textAlign: 'center',
+    fontSize: 24,
+    lineHeight: 32,
   },
   menuButtonLabel: {
     textAlign: 'center',
