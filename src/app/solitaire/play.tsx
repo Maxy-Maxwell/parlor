@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -16,6 +16,7 @@ import {
   SOLVER_RING_MS,
   SlotAnchor,
   SlotBoard,
+  SlotBoardScrollView,
   solverSlotId,
 } from '@/components/solver-click-ring';
 import { SettingsHeaderRight } from '@/components/settings-button';
@@ -158,6 +159,7 @@ export default function SolitaireScreen() {
   const pendingLeaveActionRef = useRef<Parameters<(typeof navigation)['dispatch']>[0] | null>(null);
   const abortSolveRef = useRef(false);
   const pulseTokenRef = useRef(0);
+  const infoAnchorRef = useRef<View>(null);
   const [solverPulse, setSolverPulse] = useState<{
     token: number;
     ids: ReadonlySet<string>;
@@ -435,6 +437,7 @@ export default function SolitaireScreen() {
       backLabel={backLabel}
       game={game}
       helpOpen={helpOpen}
+      infoAnchorRef={infoAnchorRef}
       hideTimer={hideTimer}
       timeLabel={timeLabel}
       busy={busy}
@@ -477,6 +480,7 @@ export default function SolitaireScreen() {
         <View style={styles.board}>
           <SlotBoard
             pulse={solverPulse}
+            stickyOffset={headerHeight}
             style={styles.boardInner}
             onLayout={(event) => {
               const { width, height } = event.nativeEvent.layout;
@@ -484,7 +488,7 @@ export default function SolitaireScreen() {
                 current.width === width && current.height === height ? current : { width, height },
               );
             }}>
-            <ScrollView
+            <SlotBoardScrollView
               style={styles.tableauArea}
               contentContainerStyle={[
                 styles.tableauScrollContent,
@@ -506,7 +510,7 @@ export default function SolitaireScreen() {
                     {game.foundations.map((pile, pileIndex) => {
                       const top = pile[pile.length - 1];
                       return (
-                        <SlotAnchor key={`foundation-${pileIndex}`} slotId={`foundation-${pileIndex}`}>
+                        <SlotAnchor key={`foundation-${pileIndex}`} slotId={`foundation-${pileIndex}`} sticky>
                           <SolitaireCard
                             width={layout.cardWidth}
                             card={top}
@@ -524,7 +528,7 @@ export default function SolitaireScreen() {
 
                   <View style={[styles.stockWaste, { gap: layout.columnGap }]}>
                     <WastePile game={game} layout={layout} onPress={() => play({ zone: 'waste' })} />
-                    <SlotAnchor slotId="stock">
+                    <SlotAnchor slotId="stock" sticky>
                       <SolitaireCard
                         width={layout.cardWidth}
                         faceDown={game.stock.length > 0}
@@ -597,25 +601,17 @@ export default function SolitaireScreen() {
                   </View>
                 ))}
               </View>
-            </ScrollView>
+            </SlotBoardScrollView>
           </SlotBoard>
         </View>
       </SafeAreaView>
 
       {helpOpen ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss help"
-          onPress={() => setHelpOpen(false)}
-          style={styles.helpDismiss}>
-          <ThemedView
-            type="backgroundElement"
-            accessibilityRole="text"
-            accessibilityLabel={helpText}
-            style={styles.helpBubble}>
-            <ThemedText type="small">{helpText}</ThemedText>
-          </ThemedView>
-        </Pressable>
+        <HelpPopover
+          anchorRef={infoAnchorRef}
+          text={helpText}
+          onDismiss={() => setHelpOpen(false)}
+        />
       ) : null}
 
       {game.won ? (
@@ -800,6 +796,7 @@ function PlayToolbar({
   backLabel,
   game,
   helpOpen,
+  infoAnchorRef,
   hideTimer,
   timeLabel,
   busy,
@@ -815,6 +812,7 @@ function PlayToolbar({
   backLabel: string;
   game: GameState | null;
   helpOpen: boolean;
+  infoAnchorRef: RefObject<View | null>;
   hideTimer: boolean;
   timeLabel: string;
   busy: boolean;
@@ -835,7 +833,7 @@ function PlayToolbar({
       <SettingsHeaderRight>
         {game == null ? null : (
           <>
-            <InfoButton open={helpOpen} onPress={onToggleHelp} />
+            <InfoButton anchorRef={infoAnchorRef} open={helpOpen} onPress={onToggleHelp} />
             {hideTimer ? null : (
               <ThemedText
                 type="smallBold"
@@ -882,10 +880,20 @@ function HeaderAction({
   );
 }
 
-function InfoButton({ open, onPress }: { open: boolean; onPress: () => void }) {
+function InfoButton({
+  open,
+  onPress,
+  anchorRef,
+}: {
+  open: boolean;
+  onPress: () => void;
+  anchorRef: RefObject<View | null>;
+}) {
   const theme = useTheme();
   return (
     <Pressable
+      ref={anchorRef}
+      collapsable={false}
       accessibilityRole="button"
       accessibilityLabel="How to play"
       accessibilityState={{ expanded: open }}
@@ -899,6 +907,81 @@ function InfoButton({ open, onPress }: { open: boolean; onPress: () => void }) {
         fallback={<ThemedText type="smallBold">i</ThemedText>}
       />
     </Pressable>
+  );
+}
+
+function HelpPopover({
+  anchorRef,
+  text,
+  onDismiss,
+}: {
+  anchorRef: RefObject<View | null>;
+  text: string;
+  onDismiss: () => void;
+}) {
+  const layerRef = useRef<View>(null);
+  const [placement, setPlacement] = useState<{
+    top: number;
+    left: number;
+    maxWidth: number;
+  } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    const layer = layerRef.current;
+    const anchor = anchorRef.current;
+    if (!layer || !anchor) {
+      return;
+    }
+    anchor.measureInWindow((ax, ay, _aw, ah) => {
+      layer.measureInWindow((lx, ly, lw) => {
+        const margin = Spacing.three;
+        const maxWidth = Math.min(320, Math.max(0, lw - margin * 2));
+        const left = Math.max(margin, Math.min(ax - lx, lw - maxWidth - margin));
+        const top = ay - ly + ah + Spacing.two;
+        setPlacement((current) =>
+          current && current.top === top && current.left === left && current.maxWidth === maxWidth
+            ? current
+            : { top, left, maxWidth },
+        );
+      });
+    });
+  }, [anchorRef]);
+
+  useLayoutEffect(() => {
+    updatePlacement();
+  }, [text, updatePlacement]);
+
+  return (
+    <View
+      ref={layerRef}
+      collapsable={false}
+      pointerEvents="box-none"
+      onLayout={updatePlacement}
+      style={styles.helpLayer}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss help"
+        onPress={onDismiss}
+        style={StyleSheet.absoluteFill}
+      />
+      {placement ? (
+        <ThemedView
+          type="backgroundElement"
+          accessibilityRole="text"
+          accessibilityLabel={text}
+          pointerEvents="none"
+          style={[
+            styles.helpBubble,
+            {
+              top: placement.top,
+              left: placement.left,
+              maxWidth: placement.maxWidth,
+            },
+          ]}>
+          <ThemedText type="small">{text}</ThemedText>
+        </ThemedView>
+      ) : null}
+    </View>
   );
 }
 
@@ -991,7 +1074,7 @@ function WastePile({
   if (visible.length === 0) {
     return (
       <View style={{ width, height: layout.cardHeight }}>
-        <SlotAnchor slotId="waste">
+        <SlotAnchor slotId="waste" sticky>
           <SolitaireCard
             width={layout.cardWidth}
             emptyHint="W"
@@ -1029,7 +1112,7 @@ function WastePile({
                 height: layout.cardHeight,
               },
             ]}>
-            {top ? <SlotAnchor slotId="waste">{face}</SlotAnchor> : face}
+            {top ? <SlotAnchor slotId="waste" sticky>{face}</SlotAnchor> : face}
           </View>
         );
       })}
@@ -1079,18 +1162,17 @@ const styles = StyleSheet.create({
     zIndex: 2,
     overflow: 'visible',
   },
-  helpDismiss: {
-    ...StyleSheet.absoluteFillObject,
+  helpLayer: {
+    ...StyleSheet.absoluteFill,
     zIndex: 30,
-    alignItems: 'flex-end',
-    paddingTop: Spacing.six,
-    paddingHorizontal: Spacing.three,
   },
   helpBubble: {
+    position: 'absolute',
     maxWidth: 320,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     borderRadius: Spacing.three,
+    zIndex: 31,
   },
   overlay: {
     position: 'absolute',

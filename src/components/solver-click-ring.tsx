@@ -6,18 +6,24 @@ import {
   useMemo,
   useRef,
   useState,
-  type MutableRefObject,
   type ReactNode,
-  type RefObject,
 } from 'react';
 import {
   StyleSheet,
   View,
   type LayoutChangeEvent,
+  type ScrollViewProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import type { ClickTarget, GameState } from '@/game/solitaire';
 
@@ -28,10 +34,17 @@ const GOLD = '#FFD700';
 
 type SlotFrame = { x: number; y: number; width: number; height: number };
 type Pulse = { token: number; ids: ReadonlySet<string> };
+type SlotNode = { node: View; sticky: boolean };
+type RingItem = {
+  id: string;
+  frame: SlotFrame;
+  sticky: boolean;
+  scrollY: number;
+};
 
 type SlotBoardContextValue = {
-  boardRef: RefObject<View | null>;
-  frames: MutableRefObject<Map<string, SlotFrame>>;
+  register: (id: string, node: View | null, sticky: boolean) => void;
+  scrollY: SharedValue<number>;
 };
 
 const SlotBoardContext = createContext<SlotBoardContextValue | null>(null);
@@ -59,18 +72,28 @@ export function SlotBoard({
   children,
   style,
   onLayout,
+  stickyOffset = 0,
 }: {
   pulse: Pulse | null;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   onLayout?: (event: LayoutChangeEvent) => void;
+  stickyOffset?: number;
 }) {
   const boardRef = useRef<View>(null);
-  const frames = useRef(new Map<string, SlotFrame>());
-  const ctx = useMemo(() => ({ boardRef, frames }), []);
-  const [rings, setRings] = useState<{ token: number; items: { id: string; frame: SlotFrame }[] } | null>(
-    null,
-  );
+  const slots = useRef(new Map<string, SlotNode>());
+  const scrollY = useSharedValue(0);
+  const [rings, setRings] = useState<{ token: number; items: RingItem[] } | null>(null);
+
+  const register = useCallback((id: string, node: View | null, sticky: boolean) => {
+    if (node) {
+      slots.current.set(id, { node, sticky });
+      return;
+    }
+    slots.current.delete(id);
+  }, []);
+
+  const ctx = useMemo(() => ({ register, scrollY }), [register, scrollY]);
 
   useLayoutEffect(() => {
     if (pulse == null) {
@@ -78,28 +101,83 @@ export function SlotBoard({
       return;
     }
 
-    const collect = () => {
-      const items: { id: string; frame: SlotFrame }[] = [];
-      for (const id of pulse.ids) {
-        const frame = frames.current.get(id);
-        if (frame && frame.width > 0 && frame.height > 0) {
-          items.push({ id, frame: { ...frame } });
-        }
+    let cancelled = false;
+    let raf = 0;
+
+    const measure = (id: string, done: (item: RingItem | null) => void) => {
+      const slot = slots.current.get(id);
+      const board = boardRef.current;
+      if (!slot || !board) {
+        done(null);
+        return;
       }
-      return items;
+
+      const apply = (x: number, y: number, width: number, height: number) => {
+        if (width <= 0 || height <= 0) {
+          done(null);
+          return;
+        }
+        done({
+          id,
+          frame: { x, y, width, height },
+          sticky: slot.sticky,
+          scrollY: scrollY.value,
+        });
+      };
+
+      slot.node.measureInWindow((sx, sy, sw, sh) => {
+        board.measureInWindow((bx, by) => {
+          apply(sx - bx, sy - by, sw, sh);
+        });
+      });
     };
 
-    const items = collect();
-    setRings({ token: pulse.token, items });
-    if (items.length >= pulse.ids.size) {
-      return;
-    }
+    const collect = (done: (items: RingItem[]) => void) => {
+      const ids = [...pulse.ids];
+      if (ids.length === 0) {
+        done([]);
+        return;
+      }
 
-    const raf = requestAnimationFrame(() => {
-      setRings({ token: pulse.token, items: collect() });
+      let remaining = ids.length;
+      const items: RingItem[] = [];
+      const finish = (item: RingItem | null) => {
+        if (item) {
+          items.push(item);
+        }
+        remaining -= 1;
+        if (remaining <= 0) {
+          done(items);
+        }
+      };
+
+      for (const id of ids) {
+        measure(id, finish);
+      }
+    };
+
+    collect((items) => {
+      if (cancelled) {
+        return;
+      }
+      setRings({ token: pulse.token, items });
+      if (items.length >= pulse.ids.size) {
+        return;
+      }
+      raf = requestAnimationFrame(() => {
+        collect((retryItems) => {
+          if (!cancelled) {
+            setRings({ token: pulse.token, items: retryItems });
+          }
+        });
+      });
     });
-    return () => cancelAnimationFrame(raf);
-  }, [pulse]);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [pulse, scrollY]);
 
   return (
     <SlotBoardContext.Provider value={ctx}>
@@ -109,79 +187,97 @@ export function SlotBoard({
         style={style}
         onLayout={onLayout}>
         {children}
-        {rings?.items.map(({ id, frame }) => (
-          <View
-            key={`${rings.token}-${id}`}
-            pointerEvents="none"
-            style={[
-              styles.ringWrap,
-              {
-                left: frame.x,
-                top: frame.y,
-                width: frame.width,
-                height: frame.height,
-              },
-            ]}>
-            <SolverClickRing />
-          </View>
+        {rings?.items.map((item) => (
+          <SolverRingOverlay
+            key={`${rings.token}-${item.id}`}
+            frame={item.frame}
+            sticky={item.sticky}
+            snapshotScrollY={item.scrollY}
+            scrollY={scrollY}
+            stickyOffset={stickyOffset}
+          />
         ))}
       </View>
     </SlotBoardContext.Provider>
   );
 }
 
+export function SlotBoardScrollView({ scrollEventThrottle, ...props }: ScrollViewProps) {
+  const ctx = useContext(SlotBoardContext);
+  const fallbackScrollY = useSharedValue(0);
+  const scrollY = ctx?.scrollY ?? fallbackScrollY;
+  const handleScroll = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  return (
+    <Animated.ScrollView
+      {...props}
+      onScroll={handleScroll}
+      scrollEventThrottle={scrollEventThrottle ?? 16}
+    />
+  );
+}
+
 export function SlotAnchor({
   slotId,
+  sticky = false,
   children,
   style,
 }: {
   slotId: string;
+  sticky?: boolean;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
   const ctx = useContext(SlotBoardContext);
-  const ref = useRef<View>(null);
 
-  const report = useCallback(() => {
-    const slot = ref.current;
-    const board = ctx?.boardRef.current;
-    if (!slot || !board || !ctx) {
-      return;
-    }
-    slot.measureLayout(
-      board,
-      (x, y, width, height) => {
-        if (width <= 0 || height <= 0) {
-          return;
-        }
-        ctx.frames.current.set(slotId, { x, y, width, height });
-      },
-      () => {
-        slot.measureInWindow((sx, sy, sw, sh) => {
-          board.measureInWindow((bx, by) => {
-            if (sw <= 0 || sh <= 0) {
-              return;
-            }
-            ctx.frames.current.set(slotId, {
-              x: sx - bx,
-              y: sy - by,
-              width: sw,
-              height: sh,
-            });
-          });
-        });
-      },
-    );
-  }, [ctx, slotId]);
-
-  useLayoutEffect(() => {
-    report();
-  }, [report]);
+  const setRef = useCallback(
+    (node: View | null) => {
+      ctx?.register(slotId, node, sticky);
+    },
+    [ctx, slotId, sticky],
+  );
 
   return (
-    <View ref={ref} collapsable={false} style={[styles.anchor, style]} onLayout={report}>
+    <View ref={setRef} collapsable={false} style={[styles.anchor, style]}>
       {children}
     </View>
+  );
+}
+
+function SolverRingOverlay({
+  frame,
+  sticky,
+  snapshotScrollY,
+  scrollY,
+  stickyOffset,
+}: {
+  frame: SlotFrame;
+  sticky: boolean;
+  snapshotScrollY: number;
+  scrollY: SharedValue<number>;
+  stickyOffset: number;
+}) {
+  const wrapStyle = useAnimatedStyle(() => {
+    const current = scrollY.value;
+    const delta = sticky
+      ? Math.min(current, stickyOffset) - Math.min(snapshotScrollY, stickyOffset)
+      : current - snapshotScrollY;
+    return {
+      left: frame.x,
+      top: frame.y - delta,
+      width: frame.width,
+      height: frame.height,
+    };
+  });
+
+  return (
+    <Animated.View pointerEvents="none" style={[styles.ringWrap, wrapStyle]}>
+      <SolverClickRing />
+    </Animated.View>
   );
 }
 
